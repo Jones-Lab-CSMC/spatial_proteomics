@@ -1,0 +1,661 @@
+---
+title: "Suppl_Fig2"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# loading in libraries
+```{r message=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(tidyverse)
+library(ComplexHeatmap)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(DescTools)
+library(corrplot)
+library(colorspace)
+library(circlize)
+library(fgsea)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+```
+
+# loading in the proteomics data
+```{r message=FALSE}
+
+source("Read_proteomics_data.R")
+
+```
+
+# Suppl.Fig.2.A - SD plot
+```{r message=FALSE}
+prot_entrez <- read.table("./Data_for_paper_figures/prot_get_entrezID_5K_013023.txt", sep = "\t", header = T)
+
+
+prot_data_filt <- filter(prot_data, rownames(prot_data) %in% prot_entrez$Protein)
+prot_data_filt <- prot_data_filt[,rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+temp1 <- prot_data_filt
+temp1[is.na(temp1)] <- 0
+
+test3 <- temp1[apply(temp1 == 0, 1, sum) <= 20, ]
+
+prot_data_filt <- filter(prot_data_filt, rownames(prot_data_filt) %in% rownames(test3))
+
+prot_mean <- as.data.frame(rowMeans(prot_data_filt, na.rm = T))
+colnames(prot_mean) <- "avg_prot_TvsS"
+
+prot_sd <- as.data.frame(transform(prot_data_filt, SD=apply(prot_data_filt,1, sd, na.rm = TRUE))$SD)
+colnames(prot_sd) <- "SD"
+
+prot_sd$Protein <- rownames(prot_data_filt) 
+
+all(rownames(prot_mean) == prot_sd$Protein)
+
+prot_mean$SD <- prot_sd$SD
+# total proteins used as input: (filter(prot_mean, SD > 1.5))$Entrez
+
+
+prot_mean <- rownames_to_column(prot_mean, "Protein")
+prot_mean <- left_join(prot_mean, prot_entrez)
+
+low_kegg <- enrichKEGG(gene = (filter(prot_mean, SD < summary(prot_mean$SD)[[2]]))$Entrez,
+                       keyType = "ncbi-geneid")
+
+results_low_kegg <- low_kegg@result
+results_low_kegg <- filter(results_low_kegg, p.adjust < 0.05)
+
+high_kegg <- enrichKEGG(gene = (filter(prot_mean, SD > summary(prot_mean$SD)[[5]]))$Entrez,
+                        keyType = "ncbi-geneid")
+
+results_high_kegg <- high_kegg@result
+results_high_kegg <- filter(results_high_kegg, p.adjust < 0.05)
+
+
+
+ribo_prot <- (results_low_kegg[grep("Ribosome", results_low_kegg$Description),])$geneID
+ribo_prot <- unlist(strsplit(ribo_prot, "/"))
+ribo_prot <- unique(ribo_prot)
+
+highlighted_prot <- read.csv("./Data_for_paper_figures/highlight_proteins_DEPs.csv")
+
+highlighted_prot <- dplyr::filter(highlighted_prot, !From %in% c("CAV1", 'PGS2', "EHD2", "OLFL3", 'LUM', 
+                                                                 "COEA1","MYH11", "OLFL1", "CO6A2", 
+                                                                 "CO6A3", "PGS1", "TENX"))
+
+
+prot_ovca <- c(highlighted_prot$From, "WT1", "P53", "K2C7", "CDN2A",
+               "RB", "SOX17", "ERBB2", "NF1","ARI1A", "RASK", "TACC3", 
+               "CTNB1")
+
+prot_mean <- separate(prot_mean, col = "Protein", into = c("Protein", "remove"),
+                      sep = "_")
+
+
+prot_mean$group <- "None"
+prot_mean$group <- ifelse(prot_mean$Entrez %in% ribo_prot, "Ribosomal",
+                          prot_mean$group)
+prot_mean$group <- ifelse(prot_mean$Protein %in% prot_ovca, "Ovca",
+                          prot_mean$group)
+
+prot_mean <- prot_mean[order(prot_mean$group),]
+
+#png("./figures/Protein_SD_all.png", units = "in",height=7,width=13, res = 600) # change height and width parameter
+ggplot(prot_mean, aes(x = avg_prot_TvsS, y = SD, fill = group, alpha = group)) +
+  geom_point(size = 4, shape = 21, color = "black", stroke = 1.5)+
+  scale_fill_manual(values = c("grey", "#382F61", "#abdda4")) +
+  geom_label_repel(data = filter(prot_mean, Protein %in% prot_ovca),
+                   aes(label = Protein), color = c("black"),
+                   fill = "white",
+                   nudge_x = -0.20, nudge_y = 0.05, size = 4) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        legend.position = "bottom", aspect.ratio = 0.5) +
+  scale_alpha_manual(values=c(0.2,1,1)) +
+  labs(x = "Mean Protein intensity (log2)", y = "Protein variability (Sd)")
+#dev.off()
+
+#write.table(results_low_kegg, "SD_low_keggenrich_72522.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+#write.table(results_high_kegg, "SD_high_keggenrich_72522.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+```
+
+Suppl. Fig. 2.A;  Protein-gene correlation histogram
+```{r message=FALSE}
+rna_data_vst <- read.table("./Data_for_paper_figures/rna_vst_norm_26_24_HRDvsHRP_90922.txt", sep = "\t", header = T,
+                           check.names = FALSE)
+
+good.samples <- read.table("./Data_for_paper_figures/good.samples.tsv", sep = "\t", header = T)
+
+good.samples$HRD_status[grep("22720", good.samples$patientID)] <- c("HRP", "HRP")
+good.samples$HRD_status[grep("48986", good.samples$patientID)] <- c("HRP", "HRP")
+
+prot_entrez <- read.table("./Data_for_paper_figures/prot_get_entrezID_5K_013023.txt", sep = "\t", header = T)
+prot_entrez %>% group_by(gene_id) %>% summarize(frequency = n()) %>% 
+  arrange(desc(frequency)) %>% filter(frequency > 1)
+
+prot_entrez <- prot_entrez[!duplicated(prot_entrez[,c("Entrez")]),]
+prot_entrez <- na.omit(prot_entrez)
+
+coldata_prot_rna_matched <- read.csv("./Data_for_paper_figures/coldata_prot_rna_matched.csv")
+
+prot_data <- read.csv("./Data_for_paper_figures/prot_quant_fragm_filt_msstats_norepl_nopool_71722.csv")
+
+prot_data <- as.data.frame(prot_data[-1,-1])
+prot_data <- separate(prot_data, Protein, into = c("random1", "uniprot", "Protein"), sep = "\\|")
+prot_data <- subset(prot_data, select = -c(random1))
+
+prot_data <- left_join(prot_data, prot_entrez)
+sum(is.na(prot_data$Gene_name))
+
+rna_data_vst <- rownames_to_column(rna_data_vst, "gene_id")
+rna_data_vst <- separate(rna_data_vst, col = gene_id, into = c("gene_id", "version"), sep = "\\.")
+rna_data_vst <- subset(rna_data_vst, select = -c(version))
+
+
+
+common_gene_prot <- intersect(prot_data$gene_id, rna_data_vst$gene_id)
+
+#4643 common proteins and genes
+
+prot_data_filt <- filter(prot_data, gene_id %in% common_gene_prot)
+prot_data_filt <- subset(prot_data_filt, select = -c(Gene_name, gene_id, uniprot, Protein))
+prot_data_filt <- prot_data_filt[,colnames(prot_data_filt) %in% c("Entrez", coldata_prot_rna_matched$X)]
+
+
+rna_data_vst_filt <- filter(rna_data_vst, gene_id %in% common_gene_prot)
+rna_data_vst_filt <- left_join(rna_data_vst_filt, prot_entrez)
+rna_data_vst_filt <- subset(rna_data_vst_filt, select = -c(Gene_name, gene_id, uniprot, Protein))
+rna_data_vst_filt <- rna_data_vst_filt[,colnames(rna_data_vst_filt) %in% c("Entrez", coldata_prot_rna_matched$col_match)]
+
+#write.csv(rna_data_vst_filt, "rna_data_matched_prot_vst.csv")
+#write.csv(prot_data_filt, "prot_data_matched_rna_vst.csv")
+
+
+prot_number <- as.data.frame(41 - rowSums(is.na(prot_data_filt)))
+
+colnames(prot_number) <- "Protein_number"
+prot_number$Entrez <- prot_data_filt$Entrez 
+
+prot_number <- filter(prot_number, Protein_number >= 25) # 3163
+
+prot_data_filt <- filter(prot_data_filt, Entrez %in% prot_number$Entrez)
+rna_data_vst_filt <- filter(rna_data_vst_filt, Entrez %in% prot_number$Entrez)
+
+
+prot_data_filt <- prot_data_filt[order(match(prot_data_filt[,grep("Entrez", colnames(prot_data_filt))],rna_data_vst_filt[,grep("Entrez", colnames(rna_data_vst_filt))])),]
+all(rna_data_vst_filt$Entrez == prot_data_filt$Entrez)
+
+rownames(prot_data_filt) <- NULL
+prot_data_filt <- column_to_rownames(prot_data_filt, "Entrez")
+rownames(rna_data_vst_filt) <- NULL
+rna_data_vst_filt <- column_to_rownames(rna_data_vst_filt, "Entrez")
+
+all(rownames(rna_data_vst_filt) == rownames(prot_data_filt))
+
+prot_data_filt <- prot_data_filt[,coldata_prot_rna_matched$X]
+rna_data_vst_filt <- rna_data_vst_filt[,coldata_prot_rna_matched$col_match]
+all(colnames(prot_data_filt) == coldata_prot_rna_matched$X)
+all(colnames(rna_data_vst_filt) == coldata_prot_rna_matched$col_match)
+
+
+z <- as.matrix(t(prot_data_filt))
+y <- as.matrix(t(rna_data_vst_filt))
+
+prot_gene_corr <- data.frame()
+prot_gene_pvalue <- data.frame()
+for (i in 1:nrow(rna_data_vst_filt)){
+  x <- cor.test(z[,i], y[,i], method = "spearman", na.rm = T)
+  prot_gene_corr[i,1] <- x[["estimate"]][[1]]
+  prot_gene_pvalue[i,1] <- x[["p.value"]][[1]]
+}
+
+prot_gene_corr <- cbind(prot_gene_corr, prot_gene_pvalue)
+colnames(prot_gene_corr) <- c("Spearman_corr", "p.value")
+prot_gene_corr$padj <- p.adjust(prot_gene_corr$p.value, method = "BH", n = length(prot_gene_corr$p.value))
+prot_gene_corr$Protein_gene <- rownames(prot_data_filt) 
+
+summary((filter(prot_gene_corr, padj < 0.05) %>% filter(., Spearman_corr > 0))$Protein_gene)
+summary((filter(prot_gene_corr, padj < 0.05) %>% filter(., Spearman_corr < 0))$Protein_gene)
+
+median(prot_gene_corr$Spearman_corr)
+
+# 3163 proteins and genes compared
+# vst normalized = 1403 significantly positively correlated 44%
+# filtered for proteins which were quantified in more than 60% of the 41 common samples
+
+h   <- hist(prot_gene_corr$Spearman_corr, freq = FALSE, breaks = 67)
+clr <- ifelse(h$breaks >= 0, "#2E2751", "grey")
+
+#png("graph1.png", units = "in",height=6,width=8, res = 600)
+par(mar=c(5,6,4,1)+.1)
+hist(prot_gene_corr$Spearman_corr, freq = FALSE, breaks = 67, col = clr, 
+     xlab = "Spearman's Correlation", ylab = "Probability Density",
+     cex.lab=2, cex.axis=2, cex.main=2, cex.sub=2,
+     main = "Median correlation  = 0.34")
+#main = "mRNA and protein variation(primary),7% (p-value < 0.05) positive correlation)")
+abline(v = median(prot_gene_corr$Spearman_corr), col="red", lwd=3, lty=2)
+#dev.off()
+
+pathways_c2 <- gmtPathways("./Data_for_paper_figures/c2.all.v7.5.1.entrez.gmt")
+
+ranks_df <- prot_gene_corr$Spearman_corr
+names(ranks_df) <- prot_gene_corr$Protein_gene
+
+set.seed(4242)
+fgseaRes_df <- fgseaMultilevel(pathways_c2, ranks_df, minSize=1, maxSize = Inf, nPermSimple = 10000)
+
+fgseaRes_df <- na.omit(fgseaRes_df)
+fgseaRes_df_C2_filter <- filter(fgseaRes_df, padj < 0.01)
+
+#fgseaRes_df_C2_filter %>% 
+  #rowwise() %>% 
+  #mutate_if(is.list, ~paste(unlist(.), collapse = '|')) %>% 
+  #write.csv('fgseaRes_prot_rna_correlation_vst.csv', row.names = FALSE)
+```
+
+Suppl. Fig.2.C; Pathway analysis top and bottom decile
+```{r message=FALSE, eval=FALSE}
+
+source("Read_proteomics_data.R")
+
+
+abundance_tum <- as.data.frame(apply(prot_data[,rownames(dplyr::filter(coldata_prot, re_classify == "Tumor"))], 1, median, na.rm = T))
+colnames(abundance_tum) <- "median"
+
+abundance_tum <- rownames_to_column(abundance_tum, "Protein")
+
+protein_quant <- as.data.frame(apply(prot_data[,rownames(dplyr::filter(coldata_prot, re_classify == "Tumor"))], MARGIN = 1, FUN = function(x) length(x[!is.na(x)]) )
+)
+
+colnames(protein_quant) <- "Protein_across_samples"
+
+protein_quant <- filter(protein_quant, !Protein_across_samples <= 0)
+abundance_tum <- filter(abundance_tum, Protein %in% rownames(protein_quant))
+
+abundance_tum <- as.data.frame(abundance_tum[order(abundance_tum$median, decreasing = T),])
+protein_quant <- rownames_to_column(protein_quant, "Protein")
+protein_quant <- protein_quant[order(match(protein_quant[,1],abundance_tum[,1])),]
+
+
+all(protein_quant$Protein == abundance_tum$Protein)
+abundance_tum$decile <- c(rep(1:10, each = nrow(abundance_tum)/10), "10")
+abundance_tum[, 3] <- lapply(3, function(x) as.character(abundance_tum[[x]]))
+
+abundance_tum$decile <- factor(abundance_tum$decile, levels = unique(abundance_tum$decile), ordered = TRUE)
+
+highlighted_prot <- read.csv("./Data_for_paper_figures/highlight_proteins_DEPs.csv")
+protein_quant <- separate(protein_quant, col = "Protein", into = c("Protein", "b"),
+                          sep = "_")
+abundance_tum <- separate(abundance_tum, col = Protein, into = c("Protein", "a"),
+                          sep = "_")
+all(protein_quant$Protein == abundance_tum$Protein)
+
+abundance_tum$Protein_across_samples <- protein_quant$Protein_across_samples
+
+abundance_tum$Protein <- paste(abundance_tum$Protein, abundance_tum$a, sep = "_")
+abundance_tum <- subset(abundance_tum, select = -a)
+
+abundance_tum <- left_join(abundance_tum, prot_entrez)
+abundance_tum <- na.omit(abundance_tum)
+
+
+set.seed(4242)
+go_top_decile <- enrichGO(gene = (filter(abundance_tum, decile == 1))$Entrez,
+                          OrgDb = org.Hs.eg.db,
+                          ont = "BP")
+go_top_decile_simplify <- clusterProfiler::simplify(go_top_decile)
+go_top_decile_res <- go_top_decile_simplify@result
+go_top_decile_res <- filter(go_top_decile_res, p.adjust < 0.0001)
+
+set.seed(4242)
+go_bottom_decile <- enrichGO(gene = (filter(abundance_tum, decile == 10))$Entrez,
+                             OrgDb = org.Hs.eg.db,
+                             ont = "BP")
+
+go_bottom_decile_simplify <- clusterProfiler::simplify(go_bottom_decile)
+go_bottom_decile_res <- go_bottom_decile@result
+go_bottom_decile_res <- filter(go_bottom_decile_res, p.adjust < 0.05)
+
+#write.table(protein_quant, "proteins_quantified_across_tumor.txt", sep = "\t", col.names = T, row.names = F, quote = F)
+#write.table(go_top_decile_res, "go_top_decile_res.txt", sep = "\t", col.names = T, row.names = F, quote = F)
+#write.table(go_bottom_decile_res, "go_bottom_decile_res.txt", sep = "\t", col.names = T, row.names = F, quote = F)
+
+# plotting figure
+go_top_decile_res <- as.data.frame(go_top_decile_res[order(go_top_decile_res$Count, decreasing = T),])
+go_bottom_decile_res <- as.data.frame(go_bottom_decile_res[order(go_bottom_decile_res$Count, decreasing = T),])
+
+go_top_bottom <- rbind(go_top_decile_res[1:5,], go_bottom_decile_res[1:5,])
+
+temp <- separate(go_top_bottom, geneID, paste0("X",1:43), sep="/")
+
+temp <- temp[,c(2,grep("X", colnames(temp)))]
+rownames(temp) <- NULL
+temp <- column_to_rownames(temp, "Description")
+temp <- as.data.frame(t(temp))
+temp <- gather(temp, key = "Description", value = "Entrez_ID")
+
+temp2 <-  as.data.frame(table(temp$Description, temp$Entrez_ID))
+temp2 <- spread(temp2, key = "Var2", value = "Freq")
+
+temp2 <- column_to_rownames(temp2, "Var1")
+
+abundance_temp <- filter(abundance_tum, Entrez %in% colnames(temp2))
+abundance_temp <- abundance_temp[order(abundance_temp$median),]
+abundance_temp[, 5] <- lapply(5, function(x) as.character(abundance_temp[[x]]))
+
+temp2 <- temp2[,abundance_temp$Entrez]
+
+all(colnames(temp2) == abundance_temp$Entrez)
+
+temp2 <- rownames_to_column(temp2, "Pathway")
+temp2 <- temp2[order(match(temp2[,1],go_top_bottom[,2])),]
+
+all(temp2$Pathway == go_top_bottom$Description)
+rownames(temp2) <- NULL
+temp2 <- column_to_rownames(temp2, "Pathway")
+
+hmap1 <- Heatmap(
+  temp2[c(1:5),],
+  #name = "Protein Intensity(log2)",
+  show_row_names = T,
+  show_column_names = F,
+  cluster_rows = F,
+  cluster_columns = F,
+  show_column_dend = F,
+  show_row_dend = T,
+  row_dend_reorder = T,
+  column_dend_reorder = T,
+  clustering_method_rows = "ward.D2",
+  clustering_method_columns = "ward.D2",
+  width = unit(100, "mm"), #top_annotation=colAnn,
+  #left_annotation = colAnn2,
+  col = c("white","#5e4fa2"))
+
+# color for bottom decile: 9e0142
+
+#png("./figures/go_bottom10_decile.png", units = "in",height=2.5,width=15, res = 600) # change height and width parameter
+ht <- draw(hmap1, heatmap_legend_side="left", annotation_legend_side="left")
+#dev.off()
+
+# color for top decile: 5e4fa2
+
+#png("./figures/go_top1_decile.png", units = "in",height=2.5,width=14, res = 600) # change height and width parameter
+ht <- draw(hmap1, heatmap_legend_side="left", annotation_legend_side="left")
+#dev.off()
+```
+
+#Suppl. Fig.2.D-E; PCA plots  
+```{r message=FALSE}
+
+source("Read_proteomics_data.R")
+
+temp1 <- prot_data[,colnames(prot_data) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+temp1[is.na(temp1)] <- 0
+
+test3 <- temp1[apply(temp1 == 0, 1, sum) <= 12, ]
+
+# samples that are labelled as tumor- reclassified
+# proteins quantified in more than 80% of samples
+pca_data <- prot_data_bpca[rownames(prot_data_bpca) %in% rownames(test3),colnames(prot_data_bpca) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+pca <- prcomp(t(pca_data))
+
+pca_data<- as.data.frame(pca$x)
+
+all(rownames(pca_data) == rownames(filter(coldata_prot, re_classify == "Tumor")))
+pca_data$HRD_HRP <- (filter(coldata_prot, re_classify == "Tumor"))$HRD_HRP
+pca_data$prim_recur <- (filter(coldata_prot, re_classify == "Tumor"))$prim_recur
+pca_data$Patient_ID <- (filter(coldata_prot, re_classify == "Tumor"))$Patient_ID
+
+pca_data$brca_prim <- paste(pca_data$HRD_HRP, pca_data$prim_recur,
+                            sep = "_")
+
+pca_data <- mutate(pca_data, Patient_ID = as.character(Patient_ID))
+
+#png("./figures/pca_patient_id_suppl_Fig2.A.png", units = "in", height = 8, width = 8, res = 600)
+ggplot(pca_data, aes(PC1, PC2, shape = prim_recur)) +
+  geom_point(data = filter(pca_data, !Patient_ID %in% c("41323", "29764", "25258")), size = 10, color = "grey") +
+  geom_point(data = filter(pca_data, Patient_ID %in% c("41323", "29764", "25258")), aes(color=Patient_ID), size = 10) +
+  #scale_color_manual(values = "blue") +
+  xlab(paste0("PC1: ",prettyNum(summary(pca)$importance[2,1]*100,
+                                digits = 2, decimal.mark = "."),"% variance")) +
+  ylab(paste0("PC2: ",prettyNum(summary(pca)$importance[2,2]*100,
+                                digits = 2, decimal.mark = "."),"% variance")) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        legend.title = NULL,
+        aspect.ratio=1) +
+  scale_color_manual(values = c("#f46d43", "#abdda4", "#3288bd")) +
+  labs(shape = "")
+#dev.off()
+
+#png("./figures/pca_patient_id_suppl_Fig2.B.png", units = "in", height = 8, width = 8, res = 600)
+ggplot(pca_data, aes(PC1, PC2, shape = prim_recur)) +
+  geom_point(data = filter(pca_data, !Patient_ID %in% c("21739", "18975", "22421")), size = 10, color = "grey") +
+  geom_point(data = filter(pca_data, Patient_ID %in% c("21739", "18975", "22421")), aes(color=Patient_ID), size = 10) +
+  #scale_color_manual(values = "blue") +
+  xlab(paste0("PC1: ",prettyNum(summary(pca)$importance[2,1]*100,
+                                digits = 2, decimal.mark = "."),"% variance")) +
+  ylab(paste0("PC2: ",prettyNum(summary(pca)$importance[2,2]*100,
+                                digits = 2, decimal.mark = "."),"% variance")) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        legend.title = NULL,
+        aspect.ratio=1) +
+  scale_color_manual(values = c("#9e0142", "#fdae61", "#5e4fa2")) +
+  labs(shape = "")
+#dev.off()
+```
+
+# Suppl. Fig.2.F; distance plots 
+```{r message=FALSE}
+HRD_dist <- read.table("./Data_for_paper_figures/inter_intra_HRD_samples.txt", sep = "\t", header = T)
+HRP_dist <- read.table("./Data_for_paper_figures/inter_intra_HRP_samples.txt", sep = "\t", header = T)
+
+combined_dist <- rbind(HRD_dist, HRP_dist)
+
+my_comparisons <- list(c("Inter", "Intra"))
+
+
+#png("./figures/inter_intra_dist.png", units = "in", height = 6, width = 5, res = 600)
+ggboxplot(combined_dist, x = "group", y = "Dist", fill = "group",
+          short.panel.labs = FALSE, facet.by = "big_grp",
+          add = "jitter", palette = c("#fdae61", "grey"),
+          ylab = "Euclidean distance") +
+  stat_compare_means(comparisons = my_comparisons, method = "wilcox.test",  size = 7) +
+  #scale_color_manual(values = c("#807dba", "#a6cee3", "#1f78b4")) +
+  theme(text = element_text(size = 25),
+        axis.title.x = element_blank(),
+        legend.position = "none")
+#dev.off()
+```
+
+# how the above distance files were created - This chunk of code was not run
+```{r message=FALSE, eval=FALSE}
+
+coldata_dist <- filter(coldata_heatmap, Patient_ID %in% intersect((filter(coldata_heatmap, `prim_recur` == "Primary"))$Patient_ID,
+                                                                  (filter(coldata_heatmap, `prim_recur` == "Recurrent"))$Patient_ID))
+
+
+coldata_BC <- filter(coldata_dist, HRD_status == "HRD")
+coldata_NC <- filter(coldata_dist, HRD_status == "HRP")
+
+coldata_BC <- filter(coldata_BC, PatientID %in% intersect((filter(coldata_BC, prim_recur == "Primary"))$PatientID,
+                                                          (filter(coldata_BC, prim_recur == "Recurrent"))$PatientID))
+
+coldata_NC <- filter(coldata_NC, PatientID %in% intersect((filter(coldata_NC, prim_recur == "Primary"))$PatientID,
+                                                          (filter(coldata_NC, prim_recur == "Recurrent"))$PatientID))
+
+htmap_data <- prot_data_bpca[rownames(prot_data_bpca) %in% rownames(test3),colnames(prot_data_bpca) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+most_variate_prot <- matrixStats::rowMads(as.matrix(htmap_data))
+names(most_variate_prot) <- rownames(htmap_data)
+most_variate_prot <- sort(most_variate_prot, decreasing = T)
+htmap_data <- htmap_data[names(most_variate_prot[1:1365]), ]
+htmap_data <- as.data.frame(t(scale(t(htmap_data))))
+
+df_tumor_BC <- htmap_data[,colnames(htmap_data) %in% c(rownames(coldata_BC))] # 30
+df_tumor_NC <- htmap_data[,colnames(htmap_data) %in% c(rownames(coldata_NC))] # 17
+
+hmap <- Heatmap(
+  as.matrix(t(df_tumor_BC)),
+  #name = "Protein Intensity(log2)",
+  show_row_names = F,
+  show_column_names = F,
+  cluster_rows = T,
+  cluster_columns = T,
+  show_column_dend = TRUE,
+  show_row_dend = T,
+  row_dend_reorder = T,
+  column_dend_reorder = TRUE,
+  clustering_method_rows = "ward.D",
+  clustering_method_columns = "ward.D",
+  width = unit(100, "mm"), #top_annotation=colAnn,
+  #right_annotation = colAnn,
+  column_title = "1363 most variable proteins",
+  heatmap_legend_param = list(
+    title = "z-score(Protein Intensity)",
+    title_position = "lefttop-rot"))
+
+
+dist_htmap <- dist2(hmap@matrix)
+dist_htmap <- as.matrix(dist_htmap)
+dist_htmap_BC <- as.data.frame(dist_htmap)
+
+all(rownames(dist_htmap_BC) == rownames(coldata_BC))
+
+summary(as.character(unique(coldata_BC$PatientID))) # 11
+summary(as.character(unique(coldata_NC$PatientID))) # 8
+
+df_BC <- data.frame()
+for (i in 1:11) {
+  df_BC[i,1] <- mean(dist_htmap_BC[rownames(filter(coldata_BC, PatientID == unique(coldata_BC$PatientID)[i]) %>% 
+                                              filter(., prim_recur == "Primary")),
+                                   rownames(filter(coldata_BC, PatientID == unique(coldata_BC$PatientID)[i]) %>% 
+                                              filter(., prim_recur == "Recurrent"))]
+  )
+}
+
+numbers <- which(is.na(df_BC))
+df2_BC <- data.frame()
+for (i in 1:3) {
+  df2_BC[i,1] <- rowMeans(dist_htmap_BC[rownames(filter(coldata_BC, PatientID == unique(coldata_BC$PatientID)[numbers[i]]) %>% 
+                                                   filter(., prim_recur == "Primary")),
+                                        rownames(filter(coldata_BC, PatientID == unique(coldata_BC$PatientID)[numbers[i]]) %>% 
+                                                   filter(., prim_recur == "Recurrent"))]
+  )
+}
+
+df_BC[1,] <- df2_BC[1,]
+df_BC[4,] <- df2_BC[2,]
+df_BC[7,] <- df2_BC[3,]
+
+
+colnames(df_BC) <- "Dist"
+df_BC$group <- "Intra"
+
+rownames(df_BC) <- unique(coldata_BC$PatientID)
+
+# inter patient distance
+df_inter_BC <- filter(dist_htmap_BC, rownames(dist_htmap_BC) %in% 
+                        rownames(filter(coldata_BC, prim_recur == "Primary")))
+
+df_inter_BC <- subset(df_inter_BC, select = rownames(filter(coldata_BC, prim_recur == "Recurrent")))
+
+temp_primary <- filter(coldata_BC, prim_recur == "Primary")
+
+
+all(rownames(df_inter_BC) == rownames(temp_primary))
+
+df_inter_BC <- df_inter_BC[!rownames(df_inter_BC) %in% rownames(filter(temp_primary, PatientID %in% 
+                                                                         temp_primary[duplicated(temp_primary$PatientID),3])),]
+
+df_inter_BC <- as.data.frame(rowMeans(df_inter_BC))
+
+# order of sample "27481" "22421"
+#rownames(filter(temp_primary, PatientID %in% unique(temp_primary[duplicated(temp_primary$PatientID),3])[2]))
+all(colnames((dist_htmap_BC)) == rownames(coldata_BC))
+
+df_inter_BC[10,] <- mean(rowMeans(dist_htmap_BC[rownames(filter(temp_primary, PatientID %in% unique(temp_primary[duplicated(temp_primary$PatientID),3])[1])),
+                                                rownames(filter(coldata_BC, prim_recur == "Recurrent"))])
+)
+
+df_inter_BC[11,] <- mean(rowMeans(dist_htmap_BC[rownames(filter(temp_primary, PatientID %in% unique(temp_primary[duplicated(temp_primary$PatientID),3])[2])),
+                                                rownames(filter(coldata_BC, prim_recur == "Recurrent"))])
+)
+
+colnames(df_inter_BC) <- "Dist"
+df_inter_BC$group <- "Inter"
+df_inter_BC <- rownames_to_column(df_inter_BC, "sample")
+
+coldata_BC <- rownames_to_column(coldata_BC, "sample")
+df_inter_BC <- left_join(df_inter_BC, coldata_BC)
+
+df_inter_BC$PatientID[10:11] <- c("27481", "22421")
+df_inter_BC <- df_inter_BC[,c(6,2:3)]
+df_inter_BC <- column_to_rownames(df_inter_BC, "PatientID")
+
+df_prim_recur_BC <- rbind(df_BC, df_inter_BC)
+
+
+################################################################
+## HRP samples distance plot
+################################################################
+
+
+df_NC <- data.frame()
+for (i in 1:8) {
+  df_NC[i,1] <- mean(dist_htmap_NC[rownames(filter(coldata_NC, PatientID == unique(coldata_NC$PatientID)[i]) %>% 
+                                              filter(., prim_recur == "Primary")),
+                                   rownames(filter(coldata_NC, PatientID == unique(coldata_NC$PatientID)[i]) %>% 
+                                              filter(., prim_recur == "Recurrent"))]
+  )
+}
+
+df_NC[3,] <- rowMeans(dist_htmap_NC[rownames(filter(coldata_NC, PatientID == unique(coldata_NC$PatientID)[3]) %>% 
+                                               filter(., prim_recur == "Primary")),
+                                    rownames(filter(coldata_NC, PatientID == unique(coldata_NC$PatientID)[3]) %>% 
+                                               filter(., prim_recur == "Recurrent"))])
+
+colnames(df_NC) <- "Dist"
+df_NC$group <- "Intra"
+rownames(df_NC) <- unique(coldata_NC$PatientID)
+# inter patient distance
+
+df_inter_NC <- filter(dist_htmap_NC, rownames(dist_htmap_NC) %in% 
+                        rownames(filter(coldata_NC, prim_recur == "Primary")))
+
+df_inter_NC <- subset(df_inter_NC, select = rownames(filter(coldata_NC, prim_recur == "Recurrent")))
+
+
+df_inter_NC <- as.data.frame(rowMeans(df_inter_NC))
+
+colnames(df_inter_NC) <- "Dist"
+df_inter_NC$group <- "Inter"
+
+df_inter_NC <- rownames_to_column(df_inter_NC, "sample")
+coldata_NC <- rownames_to_column(coldata_NC, "sample")
+df_inter_NC <- left_join(df_inter_NC, coldata_NC)
+
+df_inter_NC <- df_inter_NC[,c(6,2:3)]
+df_inter_NC <- column_to_rownames(df_inter_NC, "PatientID")
+
+df_prim_recur_NC <- rbind(df_NC, df_inter_NC)
+
+
+write.table(df_prim_recur_BC, "inter_intra_HRD_samples.txt", quote = F, sep = "\t", row.names = T, col.names = T)
+write.table(df_prim_recur_NC, "inter_intra_HRP_samples.txt", quote = F, sep = "\t", row.names = T, col.names = T)
+
+
+
+
+```

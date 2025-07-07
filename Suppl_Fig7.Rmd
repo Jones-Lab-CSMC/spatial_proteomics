@@ -1,0 +1,158 @@
+---
+title: "Suppl_Fig7"
+output: html_document
+date: "2024-03-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r message=FALSE}
+library(tidyverse)
+
+cellcount_hovernet <- read.table("./Data_for_paper_figures/ROI_FFPE_cell_count_110623.txt", sep = "\t", header = T)
+
+df <- read.table("./Data_for_paper_figures/merged_cell_summary_akoya.txt", sep = "\t", header = F) 
+colnames(df) <- c("cell_type", "raw_count", "norm_count", "accession_number")
+
+metadata <- read_csv("./Data_for_paper_figures/Akoya_sample_info_25slides_072023.csv")
+metadata <- as.data.frame(metadata)
+
+setdiff(metadata$accession_number, df$accession_number)
+setdiff(df$accession_number, metadata$accession_number)
+
+# S13-32894-G1 is labelled as S13-32894_G1 in the merged file
+# changing this specific accession number in the metadata file
+
+metadata[grep("S13-32894-G1", metadata$accession_number),1] <- "S13-32894_G1"
+setdiff(metadata$accession_number, df$accession_number)
+setdiff(df$accession_number, metadata$accession_number)
+
+df <- left_join(df, metadata)
+
+### converting normalized counts (cell count/ total number of cells) to percentages
+df$norm_count <- df$norm_count*100
+
+### boxplot of broad categories; total perce
+##########################################################################
+
+df$broad_cells <- "Immune_cells"
+df$broad_cells <- ifelse(df$cell_type == "Endothelial cells", "Stroma", df$broad_cells)
+df$broad_cells <- ifelse(df$cell_type == "Fibroblasts", "Stroma", df$broad_cells)
+df$broad_cells <- ifelse(df$cell_type == "Necrotic Tumor cells", "Necrotic Tumor cells", df$broad_cells)
+df$broad_cells <- ifelse(df$cell_type == "other", "other", df$broad_cells)
+df$broad_cells <- ifelse(df$cell_type == "Smooth muscle cells", "Stroma", df$broad_cells)
+df$broad_cells <- ifelse(df$cell_type == "Tumor cells", "Tumor", df$broad_cells)
+df$broad_cells <- ifelse(df$cell_type == "T cells double negative", "T cells double negative", df$broad_cells)
+df$broad_cells <- ifelse(df$cell_type == "Epithelial cells", "Epithelial cells", df$broad_cells)
+
+
+### comparing the two data types; akoya -broad cateogories and hovernet cell types
+##########################################################################
+
+
+hovernet_results <- subset(cellcount_hovernet, select = c("image_svs_name","cell_type","cell_perc"))
+colnames(hovernet_results) <- c("image_svs_name", "hovernet_celltype", "cell_perc")
+
+hovernet_results <- spread(hovernet_results, key = "hovernet_celltype", value = "cell_perc")
+
+akoya_broad <- filter(df, broad_cells %in% c("Immune_cells", "Stroma", "Necrotic Tumor cells", "Tumor"))
+
+result <- akoya_broad %>%
+  group_by(image_svs_name, broad_cells) %>%
+  summarise(total_value = sum(norm_count))
+
+
+result <- spread(result, key = "broad_cells", value = "total_value")
+
+result <- left_join(result, hovernet_results, by = "image_svs_name")
+
+result <- column_to_rownames(result, "image_svs_name")
+
+result <- subset(result, select = -c(necros, `no-neo`, nolabe, `Necrotic Tumor cells`))
+library(corrplot)
+
+cor_matrix <- cor(result)
+
+#install.packages("circlize")
+library(colorspace)
+blue_red <- diverge_hcl(9, "Blue-Red")
+
+# Plot the correlation matrix
+#png("./Figures/hovernet_akoya_correlation.png", units = "in", height = 8, width = 8, res = 600)
+corrplot(cor_matrix, method = "circle", order = "hclust", hclust.method = "average",
+         addCoef.col = "black", number.cex = 0.8, col = blue_red, type = 'lower',
+         tl.col = "black")
+#dev.off()
+
+
+
+### comparing the two data types; akoya -all cateogories and hovernet cell types
+##########################################################################
+
+head(akoya_broad)
+
+result_all <- subset(akoya_broad, select = c(cell_type, norm_count, image_svs_name))
+result_all <- spread(result_all, key = "cell_type", value = "norm_count")
+
+result_all <- subset(result_all, select = -c(Monocytes, `Necrotic Tumor cells`, `NK cells`))
+
+
+result_all <- left_join(result_all, hovernet_results)
+
+result_all <- column_to_rownames(result_all, "image_svs_name")
+
+result_all <- subset(result_all, select = -c(necros, `no-neo`, nolabe))
+
+cor_matrix <- cor(result_all, use="complete.obs")
+
+#install.packages("circlize")
+library(colorspace)
+blue_red <- diverge_hcl(9, "Blue-Red")
+
+# Plot the correlation matrix
+#png("./Figures/hovernet_akoya_all_correlation.png", units = "in", height = 8, width = 8, res = 600)
+corrplot(cor_matrix, method = "circle", order = "hclust", hclust.method = "average",
+         addCoef.col = "black", number.cex = 0.8, col = blue_red, type = 'lower',
+         tl.col = "black")
+#dev.off()
+```
+
+# Suppl.Fig.7.C
+```{r message=FALSE}
+s_score <- read.csv("./Data_for_paper_figures/silhouette_scores.csv")
+
+k_values <- unique(s_score$k)
+
+plot <- list(plot)
+for (i in 1:6) {
+  plt = s_score %>% filter(., k == k_values[i]) %>% 
+    ggplot(., aes(x = n, y = score)) +
+    geom_line() +
+    geom_point() +
+    theme_bw() +
+    labs(x = "", y = "",
+         title = paste0("K = ", k_values[i])) +
+    theme(plot.title = element_text(hjust = 0.995, vjust = -10),
+          text = element_text(size = 20))
+  plot[[i]] <- plt
+
+}
+  
+library(ggpubr)
+
+#png(paste0("sscore.png"), units = "in", height = 5, width = 10, res = 300)
+ggarrange(plot[[1]], plot[[2]], plot[[3]], plot[[4]], plot[[5]], plot[[6]], 
+          ncol = 3, nrow = 2)
+#dev.off()
+```
+
+# Suppl.Fig.7.D-E
+```{r message=FALSE}
+
+# NN analysis - heatmap and barplots plotted in jupyternotebook: data_wrangle_NN copy.ipynb
+
+```
+

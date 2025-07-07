@@ -1,0 +1,321 @@
+---
+title: "Figure 2"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# original files on HPC
+```{r message=FALSE}
+
+# this is where the DEA was performed on HPC: /common/dabkek/re-NewAcquisition/tcga_style_mapdia_analysis_1-19-20/re-mapdia_msstats/HRD_HRP_DEA
+
+
+# the wilcox test for rna-seq was performed here: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_RNA-Seq/TCR_RNA_seq/wilcox_ttest
+
+```
+
+# loading libraries
+```{r message=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(tidyverse)
+library(ComplexHeatmap)
+library(ggpubr)
+library(ggrepel)
+library(factoextra)
+```
+
+# Figure 2.B - Volcano plot
+```{r message=FALSE}
+mapdia_HRDvsHRP <- read.table("./Data_for_paper_figures/mapDIA_HRDvsHRP_91822.txt", sep = "\t", header = T)
+
+mapdia_HRDvsHRP <- mapdia_HRDvsHRP[-1,]
+
+mapdia_HRDvsHRP <- separate(mapdia_HRDvsHRP, col = "Protein", into = c("a", "b", "Protein"),
+                            sep = "\\|")
+
+summary((filter(mapdia_HRDvsHRP, log2FC > 0.5) %>% filter(., FDR < .01))$Protein) # 10
+summary((filter(mapdia_HRDvsHRP, log2FC < -0.5) %>% filter(., FDR < .01))$Protein) # 324
+
+df <- mapdia_HRDvsHRP
+df <- separate(df, col = Protein, into = "Protein", sep = "_")
+
+#png("./figures/HRDvsHRP_log2FC.png", units = "in", height = 6, width = 9, res = 600)
+ggplot(data = df, aes(y = log2FC, x = -1*log10(FDR))) + geom_point(size = 3, color = "grey") +
+  geom_point(data = filter(df, log2FC > 0.5) %>% filter(., FDR <= 0.01), color = "#D53E4F", size = 4) +
+  geom_point(data = filter(df, log2FC < -0.5) %>% filter(., FDR <= 0.01), color = "#3288BD", size = 4) +
+  theme_bw() +
+  geom_label_repel(data = filter(df, log2FC > 0.5) %>% filter(., FDR <= 0.01),
+                   aes(label = (filter(df, log2FC > 0.5) %>% filter(., FDR <= 0.01))$Protein),
+                   nudge_x = -0.20, nudge_y = 0.05, size = 4) + 
+  geom_label_repel(data = filter(df, log2FC < -1) %>% filter(., FDR <= 0.01),
+                   aes(label = (filter(df, log2FC < -1) %>% filter(., FDR <= 0.01))$Protein),
+                   nudge_x = -0.20, nudge_y = 0.05, size = 4) +
+  theme(axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  coord_flip(clip = "off") +
+  theme(panel.grid = element_blank(),
+        text = element_text(size = 20))
+#dev.off()
+```
+
+# Figure 2.B
+```{r message=FALSE}
+prot_entrez <- read.table("./Data_for_paper_figures/prot_get_entrezID_5K_013023.txt", sep = "\t", header = T)
+prot_entrez <- prot_entrez[!duplicated(prot_entrez[,c("Protein")]),]
+prot_entrez <- prot_entrez[!duplicated(prot_entrez[,c("Entrez")]),]
+
+mapdia_HRDvsHRP <- left_join(mapdia_HRDvsHRP, prot_entrez)
+mapdia_HRDvsHRP_entrez <- mapdia_HRDvsHRP 
+
+sum(is.na(mapdia_HRDvsHRP_entrez))
+
+mapdia_HRDvsHRP_entrez <- na.omit(mapdia_HRDvsHRP_entrez)
+
+ranks_HRD_HRP <- mapdia_HRDvsHRP$log2FC
+names(ranks_HRD_HRP) <- mapdia_HRDvsHRP$Entrez
+
+library(fgsea)
+pathways_reactome <- gmtPathways("./Data_for_paper_figures/c2.cp.reactome.v2022.1.Hs.entrez.gmt")
+
+set.seed(4242)
+fgseaRes_HRDvsHRP_reactome <- fgseaMultilevel(pathways_reactome, ranks_HRD_HRP, minSize=1, 
+                                              maxSize = Inf, nPermSimple = 10000)
+
+fgseaRes_HRDvsHRP_reactome <- na.omit(fgseaRes_HRDvsHRP_reactome)
+fgseaRes_HRDvsHRP_reactome_filter <- filter(fgseaRes_HRDvsHRP_reactome, pval < 0.001)
+
+fgseaRes_HRDvsHRP_reactome_filter <- fgseaRes_HRDvsHRP_reactome_filter[order(fgseaRes_HRDvsHRP_reactome_filter$NES, decreasing = T),]
+
+
+fgseaRes_HRDvsHRP_reactome_filter$direction_enrichment <- ifelse(fgseaRes_HRDvsHRP_reactome_filter$NES > 0, "Upregulated in HRD", "Downregulated in HRD")
+cols <- c("Upregulated in HRD" = "#D53E4F", "Downregulated in HRD" = "#3288BD")
+
+fgseaRes_HRDvsHRP_reactome_filter <- separate(fgseaRes_HRDvsHRP_reactome_filter, col = "pathway",
+                                              into = c(paste0("V", 1:7)), sep = "_")
+fgseaRes_HRDvsHRP_reactome_filter <- fgseaRes_HRDvsHRP_reactome_filter[,-1]
+
+fgseaRes_HRDvsHRP_reactome_filter <- tidyr::unite(fgseaRes_HRDvsHRP_reactome_filter, pathway, 
+                                                  V2, V3, V4, V5,V6,V7, na.rm = TRUE, sep = ' ')
+
+#png("./figures/GSEA_HRDvsHRP_reactome.png", units = "in", height = 8, width = 15, res = 600)
+ggplot(fgseaRes_HRDvsHRP_reactome_filter, aes(reorder(pathway, NES), NES, fill = direction_enrichment)) +
+  geom_col() +
+  scale_fill_manual(values = cols) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score") +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        text = element_text(size = 20),
+        legend.position = "bottom") +
+  labs(fill = "Pathway enrichment")
+#dev.off()
+
+#fgseaRes_HRDvsHRP_reactome_filter %>% 
+ # rowwise() %>% 
+  #mutate_if(is.list, ~paste(unlist(.), collapse = '|')) %>% 
+  #write.csv('fgseaRes_HRDvsHRP_reactome_filt.csv', row.names = FALSE)
+
+#fgseaRes_HRDvsHRP_c2 %>% 
+ # rowwise() %>% 
+#  mutate_if(is.list, ~paste(unlist(.), collapse = '|')) %>% 
+ # write.csv('fgseaRes_HRDvsHRP_91822.csv', row.names = FALSE)
+
+#write.table(mapdia_HRDvsHRP_entrez, "mapdia_HRDvsHRP_entrez_91822.txt", sep = "\t", quote = F,
+ #           row.names = F, col.names = T)
+```
+
+# Figure 2.C 
+```{r message=FALSE}
+t_test_result <- read.table("./Data_for_paper_figures/t_test_RNA-seq_vst_norm_HRD_HRP_wilcox_91222.txt", sep = "\t", header = T)
+t_test_result <- na.omit(t_test_result)
+t_test_result <- separate(t_test_result, gene_id, into = c("gene_id", "version"), sep = "\\.")
+
+
+mapdia_HRD_HRP <- read.table("./Data_for_paper_figures/mapDIA_HRDvsHRP_91822.txt", sep = "\t", header = T)
+mapdia_HRD_HRP <- mapdia_HRD_HRP[-1,]
+mapdia_HRD_HRP <- separate(mapdia_HRD_HRP, col = Protein, into = c("a", "b", "Protein"), sep = "\\|")
+
+prot_entrez <- read.table("./Data_for_paper_figures/prot_get_entrezID_5K_013023.txt", sep = "\t", header = T)
+
+mapdia_HRD_HRP <- left_join(mapdia_HRD_HRP, prot_entrez)
+mapdia_prot <- na.omit(mapdia_HRD_HRP)
+
+prot_entrez <- separate(prot_entrez, Protein, into = c("Protein", "human"), sep = "_")
+
+genes_common_to_prot <- intersect((filter(t_test_result, padj_wilcox < 0.05))$gene_id,
+                                  mapdia_prot$gene_id) #55
+
+prot_common_to_gene <- intersect(t_test_result$gene_id,
+                                 (filter(mapdia_prot, FDR < 0.001))$gene_id) #579
+
+mapdia_common_prot <- filter(mapdia_prot, gene_id %in% 
+                               unique(c(genes_common_to_prot, prot_common_to_gene))) #624
+
+
+rna_HRD_vs_HRP <- filter(t_test_result, gene_id %in% 
+                           unique(c(genes_common_to_prot, prot_common_to_gene)))
+rna_HRD_vs_HRP <- rna_HRD_vs_HRP[order(match(rna_HRD_vs_HRP[,grep("gene_id", colnames(rna_HRD_vs_HRP))],mapdia_common_prot[,grep("gene_id", colnames(mapdia_common_prot))])),]
+rna_HRD_vs_HRP <- rna_HRD_vs_HRP[!duplicated(rna_HRD_vs_HRP[,c("gene_id")]),]
+all(rna_HRD_vs_HRP$gene_id == mapdia_common_prot$gene_id)
+
+abundance_tum <- read.table("./Data_for_paper_figures/Figure1_table_abundance_prot_quant.txt",
+                            sep = "\t", header = T)
+
+mapdia_common_prot <- filter(mapdia_common_prot, gene_id %in% 
+                               (filter(prot_entrez, Protein %in% (filter(abundance_tum, Protein_across_samples > 47))$Protein))$gene_id) # 460
+
+rna_HRD_vs_HRP <- filter(rna_HRD_vs_HRP, gene_id %in% 
+                           (filter(prot_entrez, Protein %in% (filter(abundance_tum, Protein_across_samples > 47))$Protein))$gene_id)
+all(rna_HRD_vs_HRP$gene_id == mapdia_common_prot$gene_id)
+
+summary(as.character(intersect(prot_common_to_gene, genes_common_to_prot))) # 10 common significantly upregulated proteins/genes
+
+#6624 84545 51067  6601  3073  1459 84817  6203  4282  8473
+# OGT1_HUMAN HEXA_HUMAN MIF_HUMAN CSK22_HUMAN RS9_HUMAN FSCN1_HUMAN RM43_HUMAN SMRC2_HUMAN
+# TXD17_HUMAN SYYM_HUMAN
+
+# 0.3 with pvalue = 1.31e-10
+cor.test(rna_HRD_vs_HRP$diff_mean, mapdia_common_prot$log2FC) # comparing 460 genes to proteins
+
+mapdia_common_prot <- separate(mapdia_common_prot, Protein, into = c("Protein", "Human"),
+                               sep = "_")
+
+mapdia_common_prot$log2FC_rna <- rna_HRD_vs_HRP$diff_mean
+mapdia_common_prot <- left_join(mapdia_common_prot, abundance_tum, by = "Protein")
+mapdia_common_prot <- mutate(mapdia_common_prot, decile = as.character(decile))
+mapdia_common_prot$gene <- rna_HRD_vs_HRP$gene_name
+
+
+mapdia_common_prot$col_FDR <- mapdia_common_prot$FDR <= 0.001
+mapdia_common_prot$col_FDR_rna <- ifelse(mapdia_common_prot$Entrez %in% (filter(rna_HRD_vs_HRP, padj_wilcox < 0.05))$Entrez,
+                                         "Significant", "Not_sign")
+
+mapdia_common_prot$common_sign <- ifelse(mapdia_common_prot$Entrez %in%
+                                           (filter(mapdia_common_prot, col_FDR == TRUE) %>% filter(., col_FDR_rna == "Significant"))$Entrez,
+                                         "Significantly upregulated", "Not Significantly upregulated")
+
+mapdia_common_prot$decile <- factor(mapdia_common_prot$decile, levels = c("1","2","3","4","5","6","7","8","9","10"), ordered = TRUE)
+
+#png("./figures/protein_rna_log2FC_HRDvsHRP_t_test.png", units = "in",height=10,width=12, res = 600)
+ggplot(mapdia_common_prot, aes(x = log2FC_rna, y = log2FC, col = decile)) +
+  geom_point(size = 3) +
+  theme_bw() +
+  ylim(c(-1.5,0.7)) + xlim(c(-2, 0.9)) +
+  scale_color_manual(values = rev(c('#9e0142','#d53e4f','#f46d43',
+                                    '#fdae61','#fee08b','#e6f598','#abdda4',
+                                    '#66c2a5','#3288bd','#5e4fa2'))) +
+  theme(text = element_text(size = 25),
+        legend.position = "bottom", aspect.ratio=1) +
+  labs(x = "log2 Fold Change - RNA", y = "log2 Fold Change - Protein", colour = "Decile") +
+  geom_label_repel(data = filter(mapdia_common_prot, log2FC_rna > 0.6 | log2FC_rna < -1), 
+                   aes(label = gene), size = 4,
+                   color = c("black"),
+                   fill = "white") +
+  geom_label_repel(data = filter(mapdia_common_prot, log2FC > 0.25) %>% filter(., log2FC_rna < 0), 
+                   aes(label = gene), size = 4,
+                   color = c("black"),
+                   fill = "white") +
+  ggtitle("Pearson's correlation = 0.3;p-value = 1.31e-10")
+#dev.off()
+
+#write.table(mapdia_common_prot, "rna_prot_rainbow_scatterplot_list_protein.txt",
+ #           sep = "\t", col.names = T, row.names = F, quote = F)
+```
+
+# Fig.2.D; code for IGV plots    
+# PoGo input: genomic coordinates for peptides
+```{r message=FALSE, eval=FALSE}
+pept_data <- read.csv("./Data_for_paper_figures/pept_quant_fragm_filt_msstats_norepl_nopool_122622.csv")
+pept_data <- subset(pept_data, select = -X)
+colnames(pept_data) <- c("PeptideSequence", colnames(pept_data)[-1])
+
+prot_pept_key <- read.table("./Data_for_paper_figures/prot_peptide_key_122622.txt", sep = "\t", header = T)
+
+pept_data <- left_join(pept_data, prot_pept_key)
+
+sum(is.na(pept_data$ProteinName))
+
+DNAJC17 <- pept_data[grep("DJC17_HUMAN", pept_data$ProteinName),]
+RFX1 <- pept_data[grep("RFX1_HUMAN", pept_data$ProteinName),]
+COPS8 <- pept_data[grep("CSN8_HUMAN", pept_data$ProteinName),]
+
+temp <- c(DNAJC17$PeptideSequence, RFX1$PeptideSequence, COPS8$PeptideSequence)
+temp <- as.data.frame(temp)
+colnames(temp) <- "Peptide"
+
+temp$Sample <- paste0(1:11, "sample")
+temp$PSMs <- 1
+temp$Quant <- 1:11
+temp <- temp[,c(2,1,3:4)]
+
+#write.table(temp, "PoGo_v1.2.3/Mac/input_pogo_122622.txt",
+ #           sep = "\t", row.names = F, col.names = T, quote = F)
+
+bed_file <- read.table("./Data_for_paper_figures/input_pogo_122622.bed",
+                       sep = "\t", header = F)
+
+bed_file <- bed_file[-5,]
+bed_file <- distinct(bed_file, V4, .keep_all = TRUE)
+
+bed_file <- subset(bed_file, select = c(V1, V2, V3, V4))
+colnames(bed_file) <- c("chr", "start", "end", "PeptideSequence")
+
+rownames(filter(coldata_prot, re_classify == "Tumor") %>% filter(., HRD_HRP == "HRD"))
+rownames(filter(coldata_prot, re_classify == "Tumor") %>% filter(., HRD_HRP == "HRP"))
+
+combined_data <- rbind(DNAJC17, RFX1, COPS8)
+combined_data <- as.data.frame(t(left_join(combined_data, bed_file)))
+
+HRD_samples <- combined_data[c("chr", "start", "end", "PeptideSequence",rownames(filter(coldata_prot, re_classify == "Tumor") %>% filter(., HRD_HRP == "HRD"))),]
+HRD_samples <- as.data.frame(t(HRD_samples))
+HRD_samples[, 5:38] <- lapply(5:38, function(x) as.numeric(HRD_samples[[x]]))
+HRD_samples$row_means <- rowMeans(HRD_samples[,5:38], na.rm = T)
+HRD_samples <- subset(HRD_samples, select = c(chr,start, end, row_means))
+HRD_samples <- na.omit(HRD_samples)
+
+HRP_samples <- combined_data[c("chr", "start", "end", "PeptideSequence",rownames(filter(coldata_prot, re_classify == "Tumor") %>% filter(., HRD_HRP == "HRP"))),]
+HRP_samples <- as.data.frame(t(HRP_samples))
+HRP_samples[, 5:29] <- lapply(5:29, function(x) as.numeric(HRP_samples[[x]]))
+HRP_samples$row_means <- rowMeans(HRP_samples[,5:29], na.rm = T)
+HRP_samples <- subset(HRP_samples, select = c(chr,start, end, row_means))
+HRP_samples <- na.omit(HRP_samples)
+
+write.table(HRD_samples, "./Data_for_paper_figures/HRD_three_prot.bedgraph",
+            sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(HRP_samples, "./Data_for_paper_figures/HRP_three_prot.bedgraph",
+            sep = "\t", row.names = F, col.names = F, quote = F)
+
+
+HRD_samples <- combined_data[c("chr", "start", "end", "PeptideSequence",rownames(filter(coldata_prot, re_classify == "Tumor") %>% filter(., HRD_HRP == "HRD"))),]
+HRD_samples <- as.data.frame(t(HRD_samples))
+HRD_samples[is.na(HRD_samples)] <- 0
+HRD_samples[, 5:38] <- lapply(5:38, function(x) as.numeric(HRD_samples[[x]]))
+HRD_samples$row_means <- rowMeans(HRD_samples[,5:38], na.rm = T)
+HRD_samples <- subset(HRD_samples, select = c(chr,start, end, row_means))
+
+
+HRP_samples <- combined_data[c("chr", "start", "end", "PeptideSequence",rownames(filter(coldata_prot, re_classify == "Tumor") %>% filter(., HRD_HRP == "HRP"))),]
+HRP_samples <- as.data.frame(t(HRP_samples))
+HRP_samples[is.na(HRP_samples)] <- 0
+HRP_samples[, 5:29] <- lapply(5:29, function(x) as.numeric(HRP_samples[[x]]))
+HRP_samples$row_means <- rowMeans(HRP_samples[,5:29], na.rm = T)
+HRP_samples <- subset(HRP_samples, select = c(chr,start, end, row_means))
+
+write.table(HRD_samples, "./Data_for_paper_figures/HRD_three_prot_zero.bedgraph",
+            sep = "\t", row.names = F, col.names = F, quote = F)
+
+write.table(HRP_samples, "./Data_for_paper_figures/HRP_three_prot_zero.bedgraph",
+            sep = "\t", row.names = F, col.names = F, quote = F)
+```

@@ -1,0 +1,601 @@
+---
+title: "Figure 1"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# location on HPC for original files
+```{r message=FALSE, eval=FALSE}
+
+# fragment_NOIMP_reformat_corrected_inputfor_msstats_SDF2_71722.csv was used to generate the original proteomics script
+# Msstats_processing_proteomics_data.R is where the above while was generated
+
+
+```
+
+# Load libraries for Figure 1
+```{r message=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(tidyverse)
+library(ComplexHeatmap)
+library(ggpubr)
+library(ggrepel)
+library(factoextra)
+
+```
+
+# Figure 1.A
+```{r message=FALSE}
+data_df <- read_excel("./Data_for_paper_figures/summary_rna_prot_wgbs_profiled_90822.xlsx")
+data_df$Mix_count <- ifelse(data_df$Mix != 0, "yes", "no")
+data_df$Stroma_count <- ifelse(data_df$Stroma != 0, "yes", "no")
+data_df <- column_to_rownames(data_df, "Tumor_ID")
+data_df <- filter(data_df, !rownames(data_df) %in% 
+                    rownames(filter(data_df, RNA_samples_profiled == "no" & Protein_samples_profiled == "no" & WGBS_Profiled == "no")))
+
+
+
+metadata <- data_df
+metadata <- subset(metadata, select = c(Patient_ID,Tumor_Type,`BRCA PROM. METH.`, `RAD51C PROM. METH`, `GERMLINE BRCA MUT`, RNA_samples_profiled,
+                                        Protein_samples_profiled, WGBS_Profiled, Akoya_profiled))
+metadata <- metadata[order(metadata$Patient_ID),]
+
+data_df <- subset(data_df, select = Patient_ID)
+data_df <- as.data.frame(data_df[order(data_df$Patient_ID),])
+colnames(data_df) <- "Patient_ID"
+
+data_df <- as.data.frame(t(data_df))
+colnames(data_df) <- rownames(metadata)
+
+all(colnames(data_df) == rownames(metadata))
+
+colnames(metadata) <- c("Patient ID", "Primary/Recurrent","BRCA PROM. METH.", "RAD51C PROM. METH", 
+                        "GERMLINE BRCA MUT","Profiled: RNA-seq", "Profiled: Proteomics", 
+                        "Profiled: WGBS", "Profiled: Spatial Phenotyping")
+
+metadata <- metadata[,c(1,2,5,3,4,7,9,6,8)]
+
+
+condition_colors <- list(`Profiled: Proteomics` = c("white", "black"),
+                         `Profiled: Spatial Phenotyping` = c("white", "black"),
+                         `Profiled: WGBS` = c("white", "black"),
+                         `Profiled: RNA-seq` = c("white", "black"),
+                         `Primary/Recurrent` = c("#f97c03","#9E95C7","#7E72B4","#5e4fa2", "#2E2751"),
+                         `BRCA PROM. METH.` = c("white", "black", "grey"),
+                         `RAD51C PROM. METH` = c("white", "black", "grey"),
+                         `GERMLINE BRCA MUT` = c("#E99EA6", "#d53e4f", "#952B37", "#3288BD"))
+
+
+
+
+names(condition_colors$`BRCA PROM. METH.`) <- c("0", "1", "NA")
+names(condition_colors$`RAD51C PROM. METH`) <- c("0", "1", "NA")
+names(condition_colors$`GERMLINE BRCA MUT`) <- c("BRCA1", "BRCA1_BRCA2", "BRCA2", "None")
+names(condition_colors$`Profiled: RNA-seq`) <- unique(metadata$`Profiled: RNA-seq`)
+names(condition_colors$`Profiled: Proteomics`) <- c("no", "yes")
+names(condition_colors$`Profiled: WGBS`) <- c("no", "yes")
+names(condition_colors$`Primary/Recurrent`) <- c("Primary", "Recurrent1", "Recurrent2",
+                                                 "Recurrent3", "Recurrent4")
+names(condition_colors$`Profiled: Spatial Phenotyping`) <- c(0,1)
+
+metadata <- filter(metadata, `Profiled: Proteomics` == 'yes')
+metadata$sample_order <- metadata$`GERMLINE BRCA MUT`
+
+metadata$sample_order[grep("1", metadata$`BRCA PROM. METH.`)] <- "d"
+metadata$sample_order[grep("1", metadata$`RAD51C PROM. METH`)] <- "e"
+
+metadata <- metadata[order(metadata$sample_order,
+                           metadata$`Patient ID`),]
+
+data_df <- data_df[,rownames(metadata)]
+
+metadata <- mutate(metadata, `Patient ID` = as.character(`Patient ID`))
+metadata <- metadata %>% mutate(column_split = data.table::rleid(`Patient ID`))
+
+all(colnames(data_df) == rownames(metadata))
+
+metadata$column_split[grep("26862", metadata$`Patient ID`)] <- c(12,12)
+
+metadata <- subset(metadata, select = -c(sample_order))
+
+metadata <- metadata[,c(1,10,2:9)]
+metadata <- mutate(metadata, `Patient ID` = as.numeric(`Patient ID`))
+
+metadata <- metadata[order(metadata$column_split),]
+data_df <- data_df[,rownames(metadata)]
+all(colnames(data_df) == rownames(metadata))
+
+which(metadata$`Patient ID` == 26862)
+
+metadata <- metadata[c(1:25,27,26,28:54),]
+data_df <- data_df[,c(1:25,27,26,28:54)]
+
+colAnn <- HeatmapAnnotation(df=metadata, which="col",
+                            col = condition_colors,
+                            annotation_width=unit(c(2, 8), "cm"),
+                            gap=unit(3, "mm"), annotation_name_gp= gpar(fontsize = 15),
+                            gp = gpar(col = "black"))
+
+hmap <- Heatmap(
+  as.matrix(data_df),
+  #name = "Protein Intensity(log2)",
+  show_row_names = F,
+  show_column_names = F,
+  cluster_rows = F,
+  cluster_columns = F,
+  show_column_dend = TRUE,
+  show_row_dend = T,
+  row_dend_reorder = T,
+  column_dend_reorder = TRUE,
+  clustering_method_rows = "ward.D",
+  clustering_method_columns = "ward.D",
+  width = unit(150, "mm"), top_annotation=colAnn,
+  column_split = metadata$column_split, border = TRUE,
+  column_gap=unit(2, "mm"))
+
+#png("./figures/summary_011224.png",height=8,width=15, res = 600,units = "in") # change height and width parameter
+ht = draw(hmap, heatmap_legend_side="right", annotation_legend_side="bottom")
+#dev.off()
+```
+
+# loading in the proteomics data
+```{r message=FALSE}
+source("Read_proteomics_data.R")
+```
+
+# Figure 1.B- left panel
+```{r message=FALSE}
+# abundance plot
+abundance <- as.data.frame(apply(prot_data, 1, median, na.rm = T))
+colnames(abundance) <- "median"
+abundance <- rownames_to_column(abundance, "sample")
+abundance <- as.data.frame(abundance[order(abundance$median, decreasing = T),])
+abundance$Rank <- 1:nrow(abundance)
+abundance$group <- "1"
+
+#png("./figures/Protein_abundance_rank_tumor_Fig1A.png", units = "in", height = 6, width = 4, res = 600)
+ggplot(abundance, aes(Rank, median, col = group)) +
+  geom_point() +
+  theme_bw() +
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "none",
+        text = element_text(size = 20)) +
+  scale_color_manual(values = "black") +
+  labs(x = "Abundance rank",
+       y = "Median protein abundance (log2)")
+#dev.off()
+```
+
+# Figure 1.B-Right panel
+```{r message=FALSE}
+prot_number <- as.data.frame(5036 - colSums(is.na(prot_data)))
+
+colnames(prot_number) <- "Protein_number"
+prot_number <- rownames_to_column(prot_number, "sample")
+all(rownames(coldata_prot) == prot_number$sample)
+prot_number$re_classify <- coldata_prot$re_classify
+prot_number <- as.data.frame(prot_number[order(prot_number$re_classify),])
+prot_number$strm_content <- "(0-35)%"
+prot_number$strm_content[grep("Mix", prot_number$re_classify)] <- "(35-55)%"
+prot_number$strm_content[grep("Stroma", prot_number$re_classify)] <- "(55-100)%"
+
+mean_conf_int <- prot_number %>%
+  group_by(strm_content) %>%
+  summarise(mean.Protein_number = mean(Protein_number, na.rm = TRUE),
+            sd.Protein_number = sd(Protein_number, na.rm = TRUE),
+            n.Protein_number = n()) %>%
+  mutate(se.Protein_number = sd.Protein_number / sqrt(n.Protein_number),
+         lower.ci.Protein_number = mean.Protein_number - qt(1 - (0.05 / 2), n.Protein_number - 1) * se.Protein_number,
+         upper.ci.Protein_number = mean.Protein_number + qt(1 - (0.05 / 2), n.Protein_number - 1) * se.Protein_number)
+
+mean_conf_int <- as.data.frame(mean_conf_int, stringsAsFactors = F)
+
+prot_number <- left_join(prot_number, mean_conf_int, by = "strm_content")
+
+
+prot_number$sample <- with(prot_number, reorder(sample, mean.Protein_number, mean))
+prot_number$strm_content <- factor(prot_number$strm_content, 
+                                   levels = c("(0-35)%", "(35-55)%", "(55-100)%"), ordered = TRUE)
+
+#png("./figures/Protein_quant_tumor_Fig1B.png", units = "in", height = 8, width = 6.5, res = 600)
+ggplot(prot_number, aes(y = sample, x = Protein_number, fill = strm_content)) +
+  geom_col() +
+  theme_bw() +
+  theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        text = element_text(size = 20),
+        legend.position = "bottom") +
+  labs(fill = "Stromal Content") +
+  scale_fill_manual(values = rev(c('#88B083','#727272', '#382F61'))) +
+  labs(x = "Quantified proteins") +
+  geom_segment(x = filter(mean_conf_int, strm_content == "(0-35)%")$mean.Protein_number, y = 38, 
+               xend = filter(mean_conf_int, strm_content == "(0-35)%")$mean.Protein_number, yend = 96) +
+  annotate("rect", ymin = 38, ymax = 96, xmin = filter(mean_conf_int, strm_content == "(0-35)%")$lower.ci.Protein_number, xmax = filter(mean_conf_int, strm_content == "(0-35)%")$upper.ci.Protein_number,
+           alpha = .4)+
+  geom_segment(x = filter(mean_conf_int, strm_content == "(35-55)%")$mean.Protein_number, 
+               y = 21, xend = filter(mean_conf_int, strm_content == "(35-55)%")$mean.Protein_number, yend = 37) +
+  annotate("rect", ymin = 21, ymax = 37, xmin = filter(mean_conf_int, strm_content == "(35-55)%")$lower.ci.Protein_number, xmax = filter(mean_conf_int, strm_content == "(35-55)%")$upper.ci.Protein_number, alpha = .4) +
+  geom_segment(x = filter(mean_conf_int, strm_content == "(55-100)%")$mean.Protein_number, 
+               y = 0, xend = filter(mean_conf_int, strm_content == "(55-100)%")$mean.Protein_number, yend = 20) +
+  annotate("rect", ymin = 0, ymax = 20, xmin = filter(mean_conf_int, strm_content == "(55-100)%")$lower.ci.Protein_number, xmax = filter(mean_conf_int, strm_content == "(55-100)%")$upper.ci.Protein_number,
+           alpha = .4)
+#dev.off()
+```
+
+# Figure 1.C
+```{r message=FALSE}
+abundance_tum <- as.data.frame(apply(prot_data[,rownames(dplyr::filter(coldata_prot, re_classify == "Tumor"))], 1, median, na.rm = T))
+colnames(abundance_tum) <- "median"
+
+abundance_tum <- rownames_to_column(abundance_tum, "Protein")
+
+protein_quant <- as.data.frame(apply(prot_data[,rownames(dplyr::filter(coldata_prot, re_classify == "Tumor"))], MARGIN = 1, FUN = function(x) length(x[!is.na(x)]) )
+)
+
+colnames(protein_quant) <- "Protein_across_samples"
+
+protein_quant <- filter(protein_quant, !Protein_across_samples <= 0)
+abundance_tum <- filter(abundance_tum, Protein %in% rownames(protein_quant))
+
+abundance_tum <- as.data.frame(abundance_tum[order(abundance_tum$median, decreasing = T),])
+protein_quant <- rownames_to_column(protein_quant, "Protein")
+protein_quant <- protein_quant[order(match(protein_quant[,1],abundance_tum[,1])),]
+
+
+all(protein_quant$Protein == abundance_tum$Protein)
+
+
+#png("hist_prot_quant_tum.png", width = 8.5, height = 6, units = "in", res = 600)
+hist(protein_quant$Protein_across_samples, seq(1:59),
+     xlab = "Samples", ylab = "Number of proteins", main = NULL,
+     cex.lab=2, cex.axis=2)
+#dev.off()
+
+
+abundance_tum$decile <- c(rep(1:10, each = nrow(abundance_tum)/10), "10")
+abundance_tum[, 3] <- lapply(3, function(x) as.character(abundance_tum[[x]]))
+
+
+
+abundance_tum$decile <- factor(abundance_tum$decile, levels = unique(abundance_tum$decile), ordered = TRUE)
+
+protein_quant <- separate(protein_quant, col = "Protein", into = c("Protein", "b"),
+                          sep = "_")
+abundance_tum <- separate(abundance_tum, col = Protein, into = c("Protein", "a"),
+                          sep = "_")
+all(protein_quant$Protein == abundance_tum$Protein)
+
+abundance_tum$Protein_across_samples <- protein_quant$Protein_across_samples
+
+write.table(abundance_tum, "Figure1_table_abundance_prot_quant.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+
+label_protein <- c("CADH1", "FOLR1", "MUC1", "EPCAM", "LRBA",
+                   "FKBP4", "PAX8",  "MSLN", "ASGL1", "MUC16", "MAL2",
+                   "MYEF2", "IF2B2")
+
+
+
+#png("./figures/abundance_protein_count.png", width = 8, height = 6, units = "in", res = 600)
+ggplot(abundance_tum, aes(x = Protein_across_samples, y = median)) +
+  geom_point(shape = 21, aes(colour = decile), size = 3, stroke = 1) +
+  scale_color_manual(values = rev(c('#9e0142','#d53e4f','#f46d43',
+                                    '#fdae61','#fee08b','#e6f598','#abdda4',
+                                    '#66c2a5','#3288bd','#5e4fa2'))) +
+  geom_point(data = filter(abundance_tum, Protein %in% label_protein), 
+             aes(colour = decile), size = 4) +
+  geom_label_repel(data = filter(abundance_tum, Protein %in% label_protein), 
+                   aes(label = Protein), size = 6) +
+  theme_bw() +
+  theme(text = element_text(size = 30),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  labs(x = "Samples", y = "log2 Median Intensity", colour = "Decile") +
+  scale_x_continuous(breaks = seq(0, 61, 5), limits=c(1, 60))
+#dev.off()
+```
+
+# Fig1.D; PCA plot 
+```{r message=FALSE}
+
+source("Read_proteomics_data.R")
+
+temp1 <- prot_data[,colnames(prot_data) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+temp1[is.na(temp1)] <- 0
+
+test3 <- temp1[apply(temp1 == 0, 1, sum) <= 12, ]
+
+# samples that are labelled as tumor- reclassified
+# proteins quantified in more than 80% of samples
+pca_data <- prot_data_bpca[rownames(prot_data_bpca) %in% rownames(test3),colnames(prot_data_bpca) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+pca <- prcomp(t(pca_data))
+
+pca_data<- as.data.frame(pca$x)
+
+all(rownames(pca_data) == rownames(filter(coldata_prot, re_classify == "Tumor")))
+pca_data$HRD_HRP <- (filter(coldata_prot, re_classify == "Tumor"))$HRD_HRP
+pca_data$prim_recur <- (filter(coldata_prot, re_classify == "Tumor"))$prim_recur
+
+pca_data$brca_prim <- paste(pca_data$HRD_HRP, pca_data$prim_recur,
+                            sep = "_")
+
+#install.packages("factoextra")
+
+#png("./figures/scree_plot.png", units = "in", height = 6, width = 8, res = 300)
+fviz_eig(pca)
+#dev.off()
+
+#png("./figures/pca1_2_Fig2.A.png", units = "in", height = 5, width = 6, res = 600)
+ggplot(pca_data, aes(PC1, PC2, fill = brca_prim)) +
+  geom_point(size = 6, colour = "black", pch = 21) +
+  xlab(paste0("PC1: ",prettyNum(summary(pca)$importance[2,1]*100,
+                                digits = 2, decimal.mark = "."),"% variance")) +
+  ylab(paste0("PC2: ",prettyNum(summary(pca)$importance[2,2]*100,
+                                digits = 2, decimal.mark = "."),"% variance")) +
+  coord_fixed() +
+  #scale_color_manual(values = c('#a6cee3','#1f78b4')) +
+  #scale_color_manual(values = c('#b2df8a','#33a02c')) +
+  #scale_color_manual(values = c('#a6cee3','#1f78b4','#b2df8a','#33a02c',
+  #                             '#fb9a99','#e31a1c','#fdbf6f','#ff7f00',
+  #                            '#cab2d6','#6a3d9a','#ffff99','#b15928',
+  #                           "black", "grey", "blue")) +
+  scale_fill_manual(values = c("#AA323F", "#E99DA5", '#286D97','#96C2DD'),
+                    labels = c("HRD-Primary", "HRD-Recurrent",
+                               "HRP-Primary", "HRP-Recurrent")) +
+  theme_linedraw() +
+  theme(text = element_text(size = 25),
+        legend.position = "bottom",
+        legend.title = NULL,
+        aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  guides(fill=guide_legend(ncol=2)) +
+  labs(fill = "")
+#dev.off()
+```
+
+# Fig1.E; heatmap plots    
+```{r message=FALSE}
+source("Read_proteomics_data.R")
+
+htmap_data <- prot_data_bpca[rownames(prot_data_bpca) %in% rownames(test3),colnames(prot_data_bpca) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+most_variate_prot <- matrixStats::rowMads(as.matrix(htmap_data))
+names(most_variate_prot) <- rownames(htmap_data)
+most_variate_prot <- sort(most_variate_prot, decreasing = T)
+htmap_data <- htmap_data[names(most_variate_prot[1:1365]), ]
+htmap_data <- as.data.frame(t(scale(t(htmap_data))))
+
+coldata_heatmap <- subset(coldata_prot, select = c(prim_recur,HRD_HRP,Patient_ID))
+coldata_heatmap <- filter(coldata_heatmap, rownames(coldata_heatmap) %in% rownames(filter(coldata_prot, re_classify == "Tumor")))
+
+coldata_heatmap$prim_HRD <- paste(coldata_heatmap$prim_recur, coldata_heatmap$HRD_HRP, sep = "_")
+coldata_heatmap <- subset(coldata_heatmap, select = -c(prim_recur,HRD_HRP))
+
+
+colnames(coldata_heatmap) <- c("Patient ID", "HRD/Recurrence status")
+
+#install.packages("randomcoloR")
+library(randomcoloR)
+
+coldata_heatmap$`Patient ID` <- as.character(coldata_heatmap$`Patient ID`) 
+patient_colors <-  c("18975" ="#0000FF", "21739" ="#FF0000", "22421" ="#00FF00",
+                     "27481" ="#000033","27561"= "#FF00B6", "28601"= "#005300",
+                     "41245" ="#FFD300","16030"= "#009FFF", "17687"="#9A4D42",
+                     "18915"="#00FFBE", "16006"="#783FC1","25258"= "#1F9698",
+                     "15815"="#FFACFD", "24892"="#B1CC71","30961"= "#F1085C",
+                     "41323"="#FE8F42", "21020"="#DD00FF", "45097" ="#204254",
+                     "32761"="#720055", "25236"="#766C95", "47573"="#02AD24",
+                     "24487"="#C8FF00", "40729"="#886C00", "29764"="#FFB79F",
+                     "48986"="#858567", "19155"="#A10300", "26862"="#14F9FF",
+                     "37306"="#00479E", "17836" = "white", "12645" ="red", 
+                     "34001" = "#8944a3", "38264" = "#a76b56", "22720" = "#7e8071", 
+                     "16015" = "purple", "40814" = "grey")
+
+patient_colors <- patient_colors[unique(coldata_heatmap$`Patient ID`)]
+
+condition_colors <- list(`HRD/Recurrence status` = c("#AA323F", "#E99DA5", '#286D97','#96C2DD'),
+                         `Patient ID` = patient_colors)
+
+names(condition_colors$`HRD/Recurrence status`) <- unique(coldata_heatmap$`HRD/Recurrence status`)
+
+
+
+colAnn <- HeatmapAnnotation(df=coldata_heatmap, which="col",
+                            col = condition_colors,
+                            annotation_width=unit(c(2, 8), "cm"),
+                            annotation_legend_param = list(
+                              `Patient ID` = list(direction = "horizontal", nrow = 5),
+                              `HRD/Recurrence status` = list(direction = "horizontal",
+                                                             nrow = 2)), 
+                            gap=unit(3, "mm"), annotation_name_gp= gpar(fontsize = 15))
+all(colnames(htmap_data) == rownames(coldata_heatmap))
+
+hmap <- Heatmap(
+  as.matrix(htmap_data),
+  #name = "Protein Intensity(log2)",
+  show_row_names = F,
+  show_column_names = F,
+  cluster_rows = T,
+  cluster_columns = T,
+  show_column_dend = TRUE,
+  show_row_dend = T,
+  row_dend_reorder = T,
+  column_dend_reorder = TRUE,
+  clustering_method_rows = "ward.D",
+  clustering_method_columns = "ward.D",
+  width = unit(100, "mm"), top_annotation=colAnn,
+  #right_annotation = colAnn,
+  column_title = "1363 most variable proteins",
+  heatmap_legend_param = list(
+    title = "z-score(Protein Intensity)",
+    title_position = "lefttop-rot"))
+
+#png("./figures/htmap_Fig2.B.png",height=8,width=13, res = 600,units = "in") # change height and width parameter
+ht = draw(hmap, heatmap_legend_side="right", annotation_legend_side="bottom")
+#dev.off()
+```
+
+# Fig 1. F; distance plot
+```{r message=FALSE}
+data_all <- read.table("./Data_for_paper_figures/inter_intra_all_samples.txt", sep = "\t", header = T)
+
+
+my_comparisons <- list(c("Inter", "Intra"))
+
+
+#png("./figures/inter_intra_dist.png", units = "in", height = 6, width = 5, res = 600)
+ggboxplot(data_all, x = "group", y = "Dist", fill = "group",
+          short.panel.labs = FALSE,
+          add = "jitter", palette = c("#fdae61", "grey"),
+          ylab = "Euclidean distance") +
+  stat_compare_means(comparisons = my_comparisons, method = "wilcox.test",  size = 7) +
+  #scale_color_manual(values = c("#807dba", "#a6cee3", "#1f78b4")) +
+  theme(text = element_text(size = 25),
+        axis.title.x = element_blank(),
+        legend.position = "none")
+#dev.off()
+```
+
+# how the distance text file was generated - this chunk of code was not run
+```{r message=FALSE, eval = FALSE}
+
+# finding patients that have primary and recurrent samples, n = 50
+coldata_dist <- filter(coldata_heatmap, Patient_ID %in% intersect((filter(coldata_heatmap, `prim_recur` == "Primary"))$Patient_ID,
+                                                                  (filter(coldata_heatmap, `prim_recur` == "Recurrent"))$Patient_ID))
+
+df_tumor <- htmap_data[,colnames(htmap_data) %in% rownames(coldata_dist)]
+
+
+hmap <- Heatmap(
+  as.matrix(t(df_tumor)),
+  #name = "Protein Intensity(log2)",
+  show_row_names = F,
+  show_column_names = F,
+  cluster_rows = T,
+  cluster_columns = T,
+  show_column_dend = TRUE,
+  show_row_dend = T,
+  row_dend_reorder = T,
+  column_dend_reorder = TRUE,
+  clustering_method_rows = "ward.D",
+  clustering_method_columns = "ward.D",
+  width = unit(100, "mm"), #top_annotation=colAnn,
+  #right_annotation = colAnn,
+  column_title = "1363 most variable proteins",
+  heatmap_legend_param = list(
+    title = "z-score(Protein Intensity)",
+    title_position = "lefttop-rot"))
+
+
+
+dist_htmap <- dist2(hmap@matrix)
+dist_htmap <- as.matrix(dist_htmap)
+dist_htmap <- as.data.frame(dist_htmap)
+
+all(rownames(dist_htmap) == rownames(coldata_dist))
+
+colnames(coldata_dist) <- c("prim_recur", "HRD_status", "PatientID", "prim_HRD")
+
+# all primary to recurrent
+df <- data.frame()
+for (i in 1:20) {
+  df[i,1] <- mean(dist_htmap[rownames(filter(coldata_dist, PatientID == unique(coldata_dist$PatientID)[i]) %>% 
+                                        filter(., prim_recur == "Primary")),
+                             rownames(filter(coldata_dist, PatientID == unique(coldata_dist$PatientID)[i]) %>% 
+                                        filter(., prim_recur == "Recurrent"))])
+}
+
+numbers <- which(is.na(df))
+df2 <- data.frame()
+for (i in 1:4) {
+  df2[i,1] <- rowMeans(dist_htmap[rownames(filter(coldata_dist, PatientID == unique(coldata_dist$PatientID)[numbers[i]]) %>% 
+                                             filter(., prim_recur == "Primary")),
+                                  rownames(filter(coldata_dist, PatientID == unique(coldata_dist$PatientID)[numbers[i]]) %>% 
+                                             filter(., prim_recur == "Recurrent"))]
+  )
+}
+
+df[1,] <- df2[1,]
+df[4,] <- df2[2,]
+df[8,] <- df2[3,]
+df[11,] <- df2[4,]
+
+colnames(df) <- "Dist"
+df$group <- "Intra"
+
+rownames(df) <- unique(coldata_dist$PatientID)
+
+df_inter <- filter(dist_htmap, rownames(dist_htmap) %in% 
+                     rownames(filter(coldata_dist, prim_recur == "Primary")))
+
+df_inter <- subset(df_inter, select = rownames(filter(coldata_dist, prim_recur == "Recurrent")))
+temp_primary <- filter(coldata_dist, prim_recur == "Primary")
+
+
+all(rownames(df_inter) == rownames(temp_primary))
+
+df_inter <- df_inter[!rownames(df_inter) %in% rownames(filter(temp_primary, PatientID %in% temp_primary[duplicated(temp_primary$PatientID),3])),]
+
+df_inter <- as.data.frame(rowMeans(df_inter))
+
+# order of sample "27481" "22421" "26862"
+#rownames(filter(temp_primary, PatientID %in% unique(temp_primary[duplicated(temp_primary$PatientID),3])[2]))
+
+df_inter[18,] <- mean(rowMeans(dist_htmap[rownames(filter(temp_primary, PatientID %in% unique(temp_primary[duplicated(temp_primary$PatientID),3])[1])),
+                                          rownames(filter(coldata_dist, prim_recur == "Recurrent"))])
+)
+
+df_inter[19,] <- mean(rowMeans(dist_htmap[rownames(filter(temp_primary, PatientID %in% unique(temp_primary[duplicated(temp_primary$PatientID),3])[2])),
+                                          rownames(filter(coldata_dist, prim_recur == "Recurrent"))])
+)
+
+df_inter[20,] <- mean(rowMeans(dist_htmap[rownames(filter(temp_primary, PatientID %in% unique(temp_primary[duplicated(temp_primary$PatientID),3])[3])),
+                                          rownames(filter(coldata_dist, prim_recur == "Recurrent"))])
+)
+
+colnames(df_inter) <- "Dist"
+df_inter$group <- "Inter"
+
+df_inter <- rownames_to_column(df_inter, "sample")
+temp_primary <- rownames_to_column(temp_primary, "sample")
+df_inter <- left_join(df_inter, temp_primary)
+df_inter$PatientID[18:20] <- c("27481", "22421", "26862")
+
+df_inter <- df_inter[,c(6,2:3)]
+df_inter <- column_to_rownames(df_inter, "PatientID")
+
+df_all_data <- rbind(df, df_inter)
+
+png("./figures/Dist_prim_recur_all_Fig2.C.png", units = "in", height = 3, width = 5, res = 600)
+ggplot(df_all_data, aes(group, Dist, fill = group)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.05) +
+  labs(y = "Euclidean distance", x = "Primary/Recurrent") +
+  theme_bw() +
+  ggtitle("p-value = 0.0002798 (Welch Two Sample t-test)") +
+  scale_fill_manual(values = c('#beaed4','#beaed4')) +
+  theme(legend.position = "none") +
+  ylim(c(20,71))
+dev.off()
+
+t.test(as.numeric(Dist) ~ group, data = df_all_data)
+
+write.table(data_all, "inter_intra_all_samples.txt", quote = F, sep = "\t", row.names = T, col.names = T)
+
+# 20 primary samples measured intra and inter patient distance
+
+```
+

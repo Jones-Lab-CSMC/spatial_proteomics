@@ -1,0 +1,64 @@
+---
+title: "Suppl.Fig5"
+output: html_document
+date: "2024-03-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# loading libraries
+```{r message=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(tidyverse)
+library(ggpubr)
+library(ggrepel)
+```
+
+# suppl.Fig.5.C - barplots
+```{r message=FALSE}
+
+df <- read.table("./Data_for_paper_figures/merged_cell_summary_akoya.txt", sep = "\t", header = F) 
+colnames(df) <- c("cell_type", "raw_count", "norm_count", "accession_number")
+
+metadata <- read_csv("./Data_for_paper_figures/Akoya_sample_info_25slides_072023.csv")
+metadata <- as.data.frame(metadata)
+
+setdiff(metadata$accession_number, df$accession_number)
+setdiff(df$accession_number, metadata$accession_number)
+
+# S13-32894-G1 is labelled as S13-32894_G1 in the merged file
+# changing this specific accession number in the metadata file
+
+metadata[grep("S13-32894-G1", metadata$accession_number),1] <- "S13-32894_G1"
+setdiff(metadata$accession_number, df$accession_number)
+setdiff(df$accession_number, metadata$accession_number)
+
+df <- left_join(df, metadata)
+sum(is.na(df))
+
+### converting normalized counts (cell count/ total number of cells) to percentages
+df$norm_count <- df$norm_count*100
+
+cell_type_col <-  c("B cells" ="#0000FF", "Cytotoxic T cells" ="#FF0000", "Endothelial cells" ="#00FF00",
+                    "Fibroblasts" ="#000033","Helper T cells"= "#FF00B6", "M1 Macrophages"= "#005300",
+                    "M2 Macrophages" ="#FFD300","Necrotic Tumor cells"= "#009FFF", "other"="#9A4D42",
+                    "Smooth muscle cells"="#00FFBE", "Tregs"="#783FC1","Tumor cells"= "#1F9698",
+                    "Dendritic cells"="#FFACFD", "NK cells"="#B1CC71","Monocytes"= "#F1085C",
+                    "T cells double negative"="#FE8F42", "Epithelial cells"="#DD00FF")
+
+#png("./Figures/quant23_bar_plots.png", units = "in", height = 8, width = 12, res = 600)
+ggplot(df, aes(x = POCROC_labels, y = norm_count, fill = cell_type)) +
+  geom_col() +
+  scale_fill_manual(values = cell_type_col) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+#dev.off()
+
+
+
+```
+

@@ -1,0 +1,369 @@
+---
+title: "Figure 3"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# location on HPC for the original files needed here
+```{r message=FALSE}
+
+############# imaging analysis;  FFPE slides only (Main folder: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_slide_analysis)
+
+# original svs files for images are in box: /Users/dabkek/Library/CloudStorage/Box-Box/FFPE_slide_scans_HE/svs_images
+#and data from the pilot round was here: /Users/dabkek/Library/CloudStorage/Box-Box/FFPE_HE_images_pilot/svs_images
+
+# json files generated on the GPU machine using hovernet are stored here on HPC: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_slide_analysis/json_files_FFPE_all_120122
+
+#pilot json files here:  /common/bermanblab/data/private_data/POC_ROC/POC_ROC_slide_analysis/json_files_pilot_FFPE
+
+# fresh frozen tissue json files here: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_slide_analysis/json_2017*
+# images for phase2 fresh frozen tissues: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_slide_analysis/json_files_ph2
+
+# location on HPC where the images were processed with ROI matching the Akoya data: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_slide_analysis/FFPE_ROI_100323
+
+# the fresh frozen svs files are scattered throughout the box folders in different folders, the key to those is here: ./Data_for_paper_figures/coordinates_image_tum_stroma_71921.xlsx (sheet 2)
+
+# svs files for hovernet were processed on the GPU machine
+#How to login:
+#ssh kruttika@10.226.39.63
+#Password: junkdnalab
+
+# location where the files were processed: /local-data/kruttika/hover_net-master 
+# use conda environment: hovernet2
+# run script run_wsi.sh where you can specify where the svs files are stored
+
+
+```
+
+# loading libraries
+```{r message=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(tidyverse)
+library(ComplexHeatmap)
+library(ggpubr)
+library(ggrepel)
+library(factoextra)
+```
+
+# Figure 3.A  - Jupyter notebook
+```{r message=FALSE}
+## see jupyter notebook for hovernet overlay analysis: compiled_code_overlay_json_svs_62921.ipynb
+## all the needed inputs should be in a separate folder within this main folder: Figure3.A-python_code
+```
+
+# Figure 3.B - cell type counts whole slide  
+```{r message=FALSE}
+# Set the working directory to where your CSV files are located
+centroid_counts <- read.table( "./Data_for_paper_figures/merged_centroid_ROI_CellCount.txt", sep = "\t", header = F)
+colnames(centroid_counts) <- c("cell_type", "cell_count", "image_svs_name")
+
+centroid_counts <- centroid_counts %>% group_by(image_svs_name, cell_type) %>% summarise(cell_count_bysample = sum(cell_count))
+colnames(centroid_counts) <- c("image_svs_name", "cell_type", "cell_count")
+
+
+
+FFPE_coldata_updated <- read_excel("./Data_for_paper_figures/FFPE_coldata_updated_121822.xlsx")
+
+setdiff(unique(FFPE_coldata_updated$image_svs_name), unique(centroid_counts$image_svs_name)) # 14 sections that did not need an ROI defined
+setdiff(unique(centroid_counts$image_svs_name), unique(FFPE_coldata_updated$image_svs_name))
+
+merged_ffpe_whole_slide <- read.table("./Data_for_paper_figures/merged_FFPE_whole_slide_count_011823.txt",
+                                      header = F)
+
+colnames(merged_ffpe_whole_slide) <- c("cell_count", "cell_type", "image_svs_name")
+setdiff(unique(centroid_counts$image_svs_name), unique(merged_ffpe_whole_slide$image_svs_name))
+setdiff(unique(merged_ffpe_whole_slide$image_svs_name), unique(centroid_counts$image_svs_name))
+
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, !image_svs_name %in% unique(centroid_counts$image_svs_name)) # remove the old counts
+
+merged_ffpe_whole_slide <- rbind(merged_ffpe_whole_slide, centroid_counts) # add the ROI specific counts
+
+# remove some samples from the analysis based on Akoya staining/absence of tissue
+# remove slide19 = spleen sample (no tumor cells in the tissue; Akoya staining)
+# remove slide48 = omentum sample (almost no tumor) I decided to remove, not profiled for Akoya
+# remove slide52 = pelvis sample (no tumor cells in the tissue; Akoya staining)
+
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, !image_svs_name == "KD-6394-048") # not profiled for Akoya
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, !image_svs_name == "KD-6394-019") # spleen 05S-14310-D
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, !image_svs_name == "KD-6394-052") # Pelvis S09-38573-C1
+
+FFPE_coldata_updated <- filter(FFPE_coldata_updated, !image_svs_name == "KD-6394-048")
+FFPE_coldata_updated <- filter(FFPE_coldata_updated, !image_svs_name == "KD-6394-019")
+FFPE_coldata_updated <- filter(FFPE_coldata_updated, !image_svs_name == "KD-6394-052")
+
+# merged ffpe contains 71 samples while FFPE_coldata contains 64 samples
+# the 7 sample difference is because merged file contains extra samples that were duplicates of the same tissue form the pilot FFPE slides
+# and one MJ slide which did not have almost any tissue in it
+
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, image_svs_name %in% FFPE_coldata_updated$image_svs_name)
+unique(merged_ffpe_whole_slide$image_svs_name) # 64 images considered here
+
+# getting percentage of cell types
+sample_total_cell_count <-  merged_ffpe_whole_slide %>% group_by(image_svs_name) %>% 
+  summarise(total_cell_count = sum(cell_count))
+
+merged_ffpe_whole_slide <- left_join(merged_ffpe_whole_slide, sample_total_cell_count)
+
+merged_ffpe_whole_slide$cell_perc <- (merged_ffpe_whole_slide$cell_count/merged_ffpe_whole_slide$total_cell_count)*100
+
+merged_ffpe_whole_slide <- left_join(merged_ffpe_whole_slide, FFPE_coldata_updated)
+
+merged_ffpe_whole_slide$prim_HRD <- paste(merged_ffpe_whole_slide$prim_recur, 
+                                          merged_ffpe_whole_slide$HRD_status, sep = "-")
+
+sum(is.na(merged_ffpe_whole_slide))
+
+#write.table(merged_ffpe_whole_slide, "ROI_FFPE_cell_count_110623.txt", sep = "\t", quote = F, row.names = F,
+ #           col.names = T)
+
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, cell_type != "nolabe")
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, cell_type != "no-neo")
+
+merged_ffpe_whole_slide$cell_type[grep("connec", merged_ffpe_whole_slide$cell_type)] <- "Connective"
+merged_ffpe_whole_slide$cell_type[grep("necros", merged_ffpe_whole_slide$cell_type)] <- "Necrotic"
+merged_ffpe_whole_slide$cell_type[grep("inflam", merged_ffpe_whole_slide$cell_type)] <- "Inflammatory"
+merged_ffpe_whole_slide$cell_type[grep("neopla", merged_ffpe_whole_slide$cell_type)] <- "Neoplastic"
+
+merged_ffpe_whole_slide <- merged_ffpe_whole_slide[order(merged_ffpe_whole_slide$prim_recur),]
+
+comparison_P_R <- list(c("Primary", "Recurrent"))
+p <- merged_ffpe_whole_slide %>% filter(., cell_type %in% c("Connective")) %>% 
+  ggboxplot(., x = "prim_recur", y = "cell_perc",
+            fill = "prim_recur", palette = c("#f97c03",'#5e4fa2'),
+            add = "jitter",
+            facet.by = "cell_type",
+            ylab = "Percentage of cell types")
+
+#png("./figures/whole_slide_count_inflam_020924.png", units = "in", height = 7, 
+ #   width = 5, res = 600)
+p + stat_compare_means(comparisons = comparison_P_R, 
+                       method = "wilcox.test",  size = 8, ylab = 75) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none") +
+  labs(fill = "") + ylab("") + ylim(c(0,80))
+#dev.off()
+
+p <- merged_ffpe_whole_slide %>% filter(., cell_type %in% c("Inflammatory")) %>% 
+  ggboxplot(., x = "prim_recur", y = "cell_perc",
+            fill = "prim_recur", palette = c("#f97c03",'#5e4fa2'),
+            add = "jitter",
+            facet.by = "cell_type",
+            ylab = "Percentage of cell types")
+
+#png("./figures/whole_slide_count_inflam_020924.png", units = "in", height = 7, 
+ #   width = 5, res = 600)
+p + stat_compare_means(comparisons = comparison_P_R, 
+                       method = "wilcox.test",  size = 8, ylab = 75) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none") +
+  labs(fill = "") + ylab("") + ylim(c(0,80))
+#dev.off()
+
+
+p <- merged_ffpe_whole_slide %>% filter(., cell_type %in% c("Neoplastic")) %>% 
+  ggboxplot(., x = "prim_recur", y = "cell_perc",
+            fill = "prim_recur", palette = c("#f97c03",'#5e4fa2'),
+            add = "jitter",
+            facet.by = "cell_type",
+            ylab = "Percentage of cell types")
+
+#png("./figures/whole_slide_neoplastic_020924.png", units = "in", height = 7, 
+ #   width = 5, res = 600)
+p + stat_compare_means(comparisons = comparison_P_R, 
+                       method = "wilcox.test",  size = 8, ylab = 100) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none") +
+  labs(fill = "") + ylab("") + ylim(c(0,110))
+#dev.off()
+
+p <- merged_ffpe_whole_slide %>% filter(., cell_type %in% c("Necrotic")) %>% 
+  ggboxplot(., x = "prim_recur", y = "cell_perc",
+            fill = "prim_recur", palette = c("#f97c03",'#5e4fa2'),
+            add = "jitter",
+            facet.by = "cell_type",
+            ylab = "Percentage of cell types")
+
+#png("./figures/whole_slide_necrotic_020924.png", units = "in", height = 7, 
+ #   width = 5, res = 600)
+p + stat_compare_means(comparisons = comparison_P_R, 
+                       method = "wilcox.test",  size = 8, ylab = 10) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none") +
+  labs(fill = "") + ylab("") + ylim(c(0,12))
+#dev.off()
+```
+
+# loading in the proteomics data
+```{r message=FALSE}
+source("Read_proteomics_data.R")
+
+```
+
+# Fig 4.C; tumor punch cell count   
+```{r message=FALSE}
+image_results <- read.table("./Data_for_paper_figures/Image_analysis_cell_proportion_proteomics_102422.txt",
+                            sep = "\t", header = T)
+
+rownames(image_results)
+image_results <- image_results[,rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+image_results <- as.data.frame(t(image_results))
+image_results <- rownames_to_column(image_results, "sample")
+
+all(image_results$sample == rownames(filter(coldata_prot, re_classify == "Tumor")))
+
+coldata_prot <- rownames_to_column(coldata_prot, "sample")
+
+image_results <- gather(image_results, key = "cell_type", value = "perc_cell",
+                        -sample)
+image_results <- left_join(image_results, coldata_prot)
+
+image_results <- subset(image_results, select = c(sample, cell_type, perc_cell, phase_corrected, HRD_HRP))
+
+image_results$HRD_category <- ifelse(image_results$phase_corrected == "BRCAwt" & 
+                                       image_results$HRD_HRP == "HRD", "Other HRD", "BRCAwt")
+
+image_results$HRD_category <- ifelse(image_results$phase_corrected == "BRCAmut", "BRCAmut", image_results$HRD_category)
+
+table((filter(image_results, cell_type == "Connective"))$HRD_category)
+
+
+image_results <- filter(image_results, !cell_type == "No_label")
+image_results <- filter(image_results, !cell_type == "non-Neoplastic")
+
+image_results3 <- filter(image_results, cell_type == "Neoplastic")
+
+
+my_comparisons <- list( c("BRCAmut", "BRCAwt"))
+
+
+p <- ggboxplot(image_results3, x = "HRD_category", y = "perc_cell",
+               fill = "HRD_category", palette = c("#D53E4F", "#3288BD", "#E99EA6"),
+               add = "jitter",
+               facet.by = "cell_type", short.panel.labs = FALSE,
+               ylab = "Percentage of cell types")
+# Use only p.format as label. Remove method name.
+#png("./figures/image_analysis_neoplastic.png", units = "in", height = 7, 
+ #   width = 4, res = 600)
+p + stat_compare_means(comparisons = my_comparisons, 
+                       method = "wilcox.test",  size = 8, label.y = 95) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top") +
+  labs(fill = "HRD category") +
+  ylim(c(0,110))
+#dev.off()
+
+
+
+p <- image_results %>% filter(., !cell_type == "Neoplastic") %>% 
+  ggboxplot(., x = "HRD_category", y = "perc_cell",
+               fill = "HRD_category", palette = c("#D53E4F", "#3288BD", "#E99EA6"),
+               add = "jitter",
+               facet.by = "cell_type", short.panel.labs = FALSE,
+               ylab = "Percentage of cell types")
+# Use only p.format as label. Remove method name.
+#png("./figures/image_analysis_3 celltypes.png", units = "in", height = 7, 
+ #   width = 4, res = 600)
+p + stat_compare_means(comparisons = my_comparisons, 
+                       method = "wilcox.test",  size = 8, label.y = 95) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top") +
+  labs(fill = "HRD category") +
+  ylim(c(0,110))
+#dev.off()
+```
+
+# Figure 3.D - complete slide NN analysis hovernet
+```{r message=FALSE}
+NN_analysis_all <- read.table("./Data_for_paper_figures/merged_threshold_NN_011823.txt",
+                              sep = "\t", header = F)
+
+colnames(NN_analysis_all) <- c("cell_type","cellcount_40",	"cellcount_50",	
+                               "cellcount_60",	"cellcount_70",	"cellcount_80",	"total_count",	
+                               "image_svs_name")
+NN_analysis_all$cell_type[grep("connec", NN_analysis_all$cell_type)] <- "Connective"
+NN_analysis_all$cell_type[grep("necros", NN_analysis_all$cell_type)] <- "Necrotic"
+NN_analysis_all$cell_type[grep("inflam", NN_analysis_all$cell_type)] <- "Inflammatory"
+NN_analysis_all$cell_type[grep("neopla", NN_analysis_all$cell_type)] <- "Neoplastic"
+NN_analysis_all$cell_type[grep("no-neo", NN_analysis_all$cell_type)] <- "Non-Neoplastic"
+
+NN_analysis_all <- filter(NN_analysis_all, image_svs_name %in% FFPE_coldata_updated$image_svs_name)
+
+NN_analysis_all$perc_40 <- (NN_analysis_all$cellcount_40/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_50 <- (NN_analysis_all$cellcount_50/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_60 <- (NN_analysis_all$cellcount_60/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_70 <- (NN_analysis_all$cellcount_70/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_80 <- (NN_analysis_all$cellcount_80/NN_analysis_all$total_count)*100
+
+NN_analysis_all <- left_join(NN_analysis_all, FFPE_coldata_updated)
+sum(is.na(NN_analysis_all))
+
+NN_analysis_all$prim_HRD <- paste(NN_analysis_all$prim_recur, NN_analysis_all$HRD_status, sep = "-")
+
+NN_analysis_all_filt <- filter(NN_analysis_all, cell_type != "Non-Neoplastic")
+
+p <- ggboxplot(NN_analysis_all_filt, 
+               x = "cell_type", y = "perc_40")
+
+#png("./figures/NN_analysis_FFPE_all_Celltype_allsamples.png", units = "in", height = 8, 
+ #   width = 12, res = 600)
+p + stat_compare_means(size = 8, method = "wilcox.test",ref.group = "Neoplastic",
+                       label = "p.format") +
+  theme(text = element_text(size = 25),
+        axis.title.x = element_blank(),
+        plot.margin = margin(1, 1, 1, 1, "cm"),
+        panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+  labs(fill = "") +
+  ylab(expression(paste("% total cell type near \n immune-rich neighborhoods")))
+#dev.off()
+```
+
+# Figure 3.E - nearest neighbor plot
+```{r message=FALSE}
+
+NN_analysis_all_filt <- NN_analysis_all_filt[order(NN_analysis_all_filt$prim_HRD),]
+
+#png("./figures/NN_ROI_conn_020924.png", units = "in", height = 4, width = 4, res = 600)
+NN_analysis_all_filt %>% filter(., cell_type == "Necrotic") %>% 
+  ggplot(., aes(x = prim_HRD, y = perc_40, color = prim_HRD)) + 
+  geom_point(position = position_jitter(width = 0.15), size = 3) +
+  scale_color_manual(values = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD')) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top",
+        plot.margin = margin(1, 1, 1, 1, "cm"))
+  #ylim(c(-0.0001, 80)) + labs(y = "")
+#dev.off()
+
+
+
+```
+

@@ -1,0 +1,660 @@
+---
+title: "Figure 5"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# some notes on the files
+```{r setup, include=FALSE}
+
+# the original images for Akoya are in a hard drive with a sticky note on it kept above my desk along with a hard drive for the SVS images of the FFPE samples copied from Biobank
+
+# the akoya data is here: Box-Box/1_Primary_Recurrent_Project/DATA/Akoya_data_images_91123
+
+# stuff in folder Box-Box/1_Primary_Recurrent_Project/DATA/Akoya_data_images_91123/old_AKOYA_Data_For_Figure_Generation 
+#was used to make the figures for Michelle's presentation at UCLA but it was not used for the paper since we moved to ROI specific areas in the tissue
+
+
+
+```
+
+
+```{r message=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+```
+
+#  Fig.5.B; all panels
+```{r message=FALSE}
+##### loading in the akoya data
+
+df <- read.table("./Data_for_paper_figures/merged_cell_summary_akoya.txt", sep = "\t", header = F) 
+colnames(df) <- c("cell_type", "raw_count", "norm_count", "accession_number")
+
+metadata <- read_csv("./Data_for_paper_figures/Akoya_sample_info_25slides_072023.csv")
+metadata <- as.data.frame(metadata)
+
+setdiff(metadata$accession_number, df$accession_number)
+setdiff(df$accession_number, metadata$accession_number)
+
+# S13-32894-G1 is labelled as S13-32894_G1 in the merged file
+# changing this specific accession number in the metadata file
+
+metadata[grep("S13-32894-G1", metadata$accession_number),1] <- "S13-32894_G1"
+setdiff(metadata$accession_number, df$accession_number)
+setdiff(df$accession_number, metadata$accession_number)
+
+df <- left_join(df, metadata)
+sum(is.na(df))
+
+### converting normalized counts (cell count/ total number of cells) to percentages
+df$norm_count <- df$norm_count*100
+
+group4_comparison <- list( c("Primary-HRD", "Primary-HRP"),
+                           c("Recurrent-HRD", "Recurrent-HRP"))
+group4_comparison_prim_recur <- list( c("Primary-HRD", "Recurrent-HRD"),
+                                      c("Primary-HRP", "Recurrent-HRP"))
+
+group4_comparison_germline <- list( c("Primary-BRCAmut", "Primary-BRCAwt"),
+                                    c("Recurrent-BRCAmut", "Recurrent-BRCAwt"))
+
+group2_HRD <- list( c("HRD", "HRP"))
+group2_prim_recur <- list( c("Primary", "Recurrent"))
+
+
+group4_color <- c("#AA323F",'#286D97', "#E99DA5",'#96C2DD')
+HRD_color <- c("#AA323F",'#286D97')
+recur_color <- c("#f97c03",'#5e4fa2')
+
+# M1 and M2 macrophages/Myeloid cells (M1,M2, monocytes,dendritic cells)
+
+Myeloid_cells <- filter(df, cell_type %in% c("M1 Macrophages", "M2 Macrophages" , "Monocytes",
+                                             "Dendritic cells"))
+
+
+data_myeloid_total <- Myeloid_cells %>% group_by(accession_number) %>% 
+  summarise(myeloid_total = sum(norm_count))
+
+Myeloid_cells <- left_join(Myeloid_cells, data_myeloid_total)
+
+Myeloid_cells$myeloid_ratios <- Myeloid_cells$norm_count/Myeloid_cells$myeloid_total
+
+
+
+Myeloid_cells$prim_HRD <- paste(Myeloid_cells$prim_recur, Myeloid_cells$HRD_status, sep = "_")
+
+pvalue_calc_myeloid <- function(data, cells){
+  pvalue1 <- (t.test((filter(data, cell_type == cells))$myeloid_ratios ~
+                       (filter(data, cell_type == cells))$prim_recur))$p.value
+  
+  print(paste0("PvsR: ", pvalue1))
+  
+  pvalue2 <- (t.test((filter(data, cell_type == cells))$myeloid_ratios ~
+                       (filter(data, cell_type == cells))$HRD_status))$p.value
+  
+  print(paste0("HRDvsHRP: ", pvalue2))
+  
+  pvalue3 <- (t.test((filter(data, cell_type == cells & HRD_status == "HRD"))$myeloid_ratios ~
+                       (filter(data, cell_type == cells & HRD_status == "HRD"))$prim_recur))$p.value
+  
+  print(paste0("HRD_PvsR: ", pvalue3))
+  
+  pvalue4 <- (t.test((filter(data, cell_type == cells & HRD_status == "HRP"))$myeloid_ratios ~
+                       (filter(data, cell_type == cells & HRD_status == "HRP"))$prim_recur))$p.value
+  
+  print(paste0("HRP_PvsR: ", pvalue4))
+  
+  pvalue5 <- (t.test((filter(data, cell_type == cells & prim_recur == "Primary"))$myeloid_ratios ~
+                       (filter(data, cell_type == cells & prim_recur == "Primary"))$HRD_status))$p.value
+  
+  print(paste0("Primary_HRDvsHRP: ", pvalue5))
+  
+  pvalue6 <- (t.test((filter(data, cell_type == cells & prim_recur == "Recurrent"))$myeloid_ratios ~
+                       (filter(data, cell_type == cells & prim_recur == "Recurrent"))$HRD_status))$p.value
+  
+  print(paste0("Recurrent_HRDvsHRP: ", pvalue6))
+}
+
+#"M1 Macrophages", "M2 Macrophages" , "Monocytes", "Dendritic cells"
+
+pvalue_calc_myeloid(Myeloid_cells, "M1 Macrophages") #Primary_HRDvsHRP: 0.019 (HRD)
+pvalue_calc_myeloid(Myeloid_cells, "M2 Macrophages") 
+pvalue_calc_myeloid(Myeloid_cells, "Dendritic cells") #HRDvsHRP: 0.048 (HRP), Primary_HRDvsHRP: 0.028 (HRP)
+#pvalue_calc_myeloid(Myeloid_cells, "Monocytes") 
+
+
+
+
+#png("./Figures/Myeloid_ratios.png", units = "in", height = 3, width = 8, res = 600)
+ggplot(Myeloid_cells, aes(x = cell_type, y = myeloid_ratios, fill = prim_HRD)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(position = position_dodge(width = 0.75)) +
+  theme_bw() +
+  scale_fill_manual(values = group4_color) +
+  theme(text = element_text(size = 15),
+        legend.position = "none") +
+  labs(y = "Cell types / Myeloid cells", x = "")
+#dev.off()
+
+
+Lymphoid_cells <- filter(df, cell_type %in% c("Cytotoxic T cells", "Helper T cells" , "T cells double negative",
+                                              "Tregs", "B cells", "NK cells"))
+
+
+data_lymphoid_total <- Lymphoid_cells %>% group_by(accession_number) %>% 
+  summarise(lymphoid_total = sum(norm_count))
+
+Lymphoid_cells <- left_join(Lymphoid_cells, data_lymphoid_total)
+Lymphoid_cells$lymphoid_ratios <- Lymphoid_cells$norm_count/Lymphoid_cells$lymphoid_total
+
+#
+
+pvalue_calc <- function(data, cells){
+  pvalue1 <- (t.test((filter(data, cell_type == cells))$lymphoid_ratios ~
+                       (filter(data, cell_type == cells))$prim_recur))$p.value
+  
+  print(paste0("PvsR: ", pvalue1))
+  
+  pvalue2 <- (t.test((filter(data, cell_type == cells))$lymphoid_ratios ~
+                       (filter(data, cell_type == cells))$HRD_status))$p.value
+  
+  print(paste0("HRDvsHRP: ", pvalue2))
+  
+  pvalue3 <- (t.test((filter(data, cell_type == cells & HRD_status == "HRD"))$lymphoid_ratios ~
+                       (filter(data, cell_type == cells & HRD_status == "HRD"))$prim_recur))$p.value
+  
+  print(paste0("HRD_PvsR: ", pvalue3))
+  
+  pvalue4 <- (t.test((filter(data, cell_type == cells & HRD_status == "HRP"))$lymphoid_ratios ~
+                       (filter(data, cell_type == cells & HRD_status == "HRP"))$prim_recur))$p.value
+  
+  print(paste0("HRP_PvsR: ", pvalue4))
+  
+  pvalue5 <- (t.test((filter(data, cell_type == cells & prim_recur == "Primary"))$lymphoid_ratios ~
+                       (filter(data, cell_type == cells & prim_recur == "Primary"))$HRD_status))$p.value
+  
+  print(paste0("Primary_HRDvsHRP: ", pvalue5))
+  
+  pvalue6 <- (t.test((filter(data, cell_type == cells & prim_recur == "Recurrent"))$lymphoid_ratios ~
+                       (filter(data, cell_type == cells & prim_recur == "Recurrent"))$HRD_status))$p.value
+  
+  print(paste0("Recurrent_HRDvsHRP: ", pvalue6))
+}
+
+pvalue_calc(Lymphoid_cells,"Cytotoxic T cells") # PvsR: 0.018 (Primary)
+pvalue_calc(Lymphoid_cells,"Helper T cells") 
+pvalue_calc(Lymphoid_cells,"Tregs") # HRP_PvsR: 0.022 (Primary), Recurrent_HRDvsHRP: 0.026 (HRD)
+pvalue_calc(Lymphoid_cells,"B cells") #HRP_PvsR: 0.024 (Recurrent)
+
+Lymphoid_cells$prim_HRD <- paste(Lymphoid_cells$prim_recur, Lymphoid_cells$HRD_status, sep = "_")
+
+
+
+#png("./Figures/Lymphoid_ratios.png", units = "in", height = 5, width = 8, res = 600)
+Lymphoid_cells %>% filter(., cell_type != c("NK cells") & cell_type != c("T cells double negative")) %>% 
+  ggplot(., aes(x = cell_type, y = lymphoid_ratios, fill = prim_HRD)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(position = position_dodge(width = 0.75)) +
+  theme_bw() +
+  scale_fill_manual(values = group4_color) +
+  theme(text = element_text(size = 15),
+        legend.position = "none") +
+  labs(y = "Cell types / Lymphoid cells", x = "")
+#dev.off()
+
+
+T_cells <- filter(df, cell_type %in% c("Cytotoxic T cells", "Helper T cells" , "T cells double negative",
+                                       "Tregs"))
+
+
+data_Tcells_total <- T_cells %>% group_by(accession_number) %>% 
+  summarise(T_cells_total = sum(norm_count))
+
+T_cells <- left_join(T_cells, data_Tcells_total)
+T_cells$Tcell_ratios <- T_cells$norm_count/T_cells$T_cells_total
+
+pvalue_calc_Tcells <- function(data, cells){
+  pvalue1 <- (t.test((filter(data, cell_type == cells))$Tcell_ratios ~
+                       (filter(data, cell_type == cells))$prim_recur))$p.value
+  
+  print(paste0("PvsR: ", pvalue1))
+  
+  pvalue2 <- (t.test((filter(data, cell_type == cells))$Tcell_ratios ~
+                       (filter(data, cell_type == cells))$HRD_status))$p.value
+  
+  print(paste0("HRDvsHRP: ", pvalue2))
+  
+  pvalue3 <- (t.test((filter(data, cell_type == cells & HRD_status == "HRD"))$Tcell_ratios ~
+                       (filter(data, cell_type == cells & HRD_status == "HRD"))$prim_recur))$p.value
+  
+  print(paste0("HRD_PvsR: ", pvalue3))
+  
+  pvalue4 <- (t.test((filter(data, cell_type == cells & HRD_status == "HRP"))$Tcell_ratios ~
+                       (filter(data, cell_type == cells & HRD_status == "HRP"))$prim_recur))$p.value
+  
+  print(paste0("HRP_PvsR: ", pvalue4))
+  
+  pvalue5 <- (t.test((filter(data, cell_type == cells & prim_recur == "Primary"))$Tcell_ratios ~
+                       (filter(data, cell_type == cells & prim_recur == "Primary"))$HRD_status))$p.value
+  
+  print(paste0("Primary_HRDvsHRP: ", pvalue5))
+  
+  pvalue6 <- (t.test((filter(data, cell_type == cells & prim_recur == "Recurrent"))$Tcell_ratios ~
+                       (filter(data, cell_type == cells & prim_recur == "Recurrent"))$HRD_status))$p.value
+  
+  print(paste0("Recurrent_HRDvsHRP: ", pvalue6))
+}
+
+pvalue_calc_Tcells(T_cells,"Cytotoxic T cells") # PvsR: 0.010 (Primary), HRD_PvsR: 0.041 (Primary)
+pvalue_calc_Tcells(T_cells,"Helper T cells") # PvsR: 0.027 (Recurrent), HRP_PvsR: 0.018 (Recurrent)
+pvalue_calc_Tcells(T_cells,"Tregs") # HRD_PvsR: 0.031 (Recurrent), Recurrent_HRDvsHRP: 0.011 (HRD)
+
+T_cells$prim_HRD <- paste(T_cells$prim_recur, T_cells$HRD_status, sep = "_")
+
+#png("./Figures/Tcell_ratios.png", units = "in", height = 3, width = 8, res = 600)
+T_cells %>% filter(., cell_type != c("T cells double negative")) %>% 
+  ggplot(., aes(x = cell_type, y = Tcell_ratios, fill = prim_HRD)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(position = position_dodge(width = 0.75)) +
+  theme_bw() +
+  scale_fill_manual(values = group4_color) +
+  theme(text = element_text(size = 15),
+        legend.position = "none") +
+  labs(y = "Cell types / T cells", x = "")
+#dev.off()
+```
+
+# Figure 5.C - bubble plot
+```{r message=FALSE}
+temp <- read_excel("./Data_for_paper_figures/bubble_plot_table_020624.xlsx")
+
+temp$adj_pvalue <- (-1*log10(temp$pvalue))/0.25
+
+temp$HRD_status <- factor(temp$HRD_status, levels = c("Primary", "Recurrent",
+                                                      "HRP_primary", "HRP_recurrent",
+                                                      "HRD", "HRP", "Primary_HRD", "Primary_HRP",
+                                                      "Recurrent_HRD", "Recurrent_HRP"), ordered = TRUE)
+temp <- na.omit(temp)
+
+#png("bubble_plot_akoya.png", units = "in", height = 8, width = 12, res = 600)
+ggplot(temp, aes(x = HRD_status, y = factor(cell_type, levels = rev(unique(cell_type))))) +
+  geom_point(aes(x = HRD_status, y = factor(cell_type, levels = rev(unique(cell_type))), fill = BaseColor, alpha = adj_pvalue), size = 10, shape = 21, stroke = 1) +
+  geom_line(aes(group = group_connect)) +
+  scale_fill_identity() +
+  theme_bw() +
+  theme(legend.key = element_blank(), 
+        axis.text.x = element_text(colour = "black", size = 16, face = "bold", angle = 90, hjust = 1), 
+        axis.text.y = element_text(colour = "black", face = "bold", size = 16), 
+        legend.text = element_text(size = 16, face ="bold", colour ="black"), 
+        legend.title = element_text(size = 16, face = "bold"), 
+        #panel.background = element_blank(), panel.border = element_rect(colour = "black", fill = NA, size = 1.2), 
+        legend.position = "right", panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) +
+  #guides(alpha = "none") + # Remove the alpha guide
+  labs(xlab = "", ylab = "")
+#{scales::rescale(x, c(0.5,1))}
+#dev.off()
+```
+
+# Figure 5.D - sting/erap+ tumor cells
+```{r message=FALSE}
+erap1_count <- read.table("./Data_for_paper_figures/temp_merged_erap1.dat", sep = "\t", header = F)
+
+colnames(erap1_count) <- c("cell_type", "raw_count", "norm_count", "accession_number")
+
+total_tumor_count <- erap1_count %>% group_by(accession_number) %>% summarise(total_tumor = sum(raw_count))
+
+erap1_count <- erap1_count[grep("\\+", erap1_count$cell_type),]
+erap1_count <- left_join(erap1_count, total_tumor_count)
+erap1_count$erap_tumor_ratio <- erap1_count$raw_count/erap1_count$total_tumor
+
+erap1_count <- left_join(erap1_count, metadata)
+
+erap1_count$prim_HRD <- paste(erap1_count$prim_recur, erap1_count$HRD_status, sep = "-")
+erap1_count$norm_count <- erap1_count$norm_count*100
+erap1_count$erap_tumor_ratio <- erap1_count$erap_tumor_ratio*100
+
+erap1_count <- erap1_count[order(erap1_count$prim_HRD),]
+
+p <- ggboxplot(erap1_count, x = "prim_HRD", y = "erap_tumor_ratio",
+               fill = "prim_HRD", 
+               palette = group4_color,
+               add = "jitter")
+
+#png("./Figures/prim_HRD_quant23_ERAP1_wilcoxtest.png", units = "in", height = 6, width = 8, res = 600)
+p + stat_compare_means(comparisons = group4_comparison, 
+                       method = "wilcox.test",  size = 8) +
+  theme(text = element_text(size = 15),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top",
+        plot.margin = margin(1, 1, 1, 1, "cm"),
+        panel.border = element_rect(colour = "black", fill=NA, linewidth=0.5)) +
+  ylab("ERAP1+/Tumor cells %") +
+  labs(fill = "")+ ylim(c(0,75))
+#dev.off()
+
+
+sting_count <- read.table("./Data_for_paper_figures/temp_merged_sting.dat", sep = "\t", header = F)
+
+colnames(sting_count) <- c("cell_type", "raw_count", "norm_count", "accession_number")
+
+total_tumor_count <- sting_count %>% group_by(accession_number) %>% summarise(total_tumor = sum(raw_count))
+
+sting_count <- sting_count[grep("\\+", sting_count$cell_type),]
+sting_count <- left_join(sting_count, total_tumor_count)
+sting_count$sting_tumor_ratio <- sting_count$raw_count/sting_count$total_tumor
+
+sting_count <- left_join(sting_count, metadata)
+
+sting_count$prim_HRD <- paste(sting_count$prim_recur, sting_count$HRD_status, sep = "-")
+
+sting_count$norm_count <- sting_count$norm_count*100
+sting_count$sting_tumor_ratio <- sting_count$sting_tumor_ratio*100
+
+sting_count <- sting_count[order(sting_count$prim_HRD),]
+
+sting_count$prim_BRCA <- paste(sting_count$prim_recur, sting_count$germline_BRCA, sep = "-")
+
+sting_count$HRD_cat <- "BRCAmut"
+sting_count$HRD_cat <- ifelse(sting_count$germline_BRCA == "BRCAwt", "BRCAwt",sting_count$HRD_cat)
+
+sting_count$HRD_cat <- ifelse(sting_count$HRD_status == "HRD" & sting_count$germline_BRCA == "BRCAwt",
+                              "other_HRD", sting_count$HRD_cat)
+
+germline_comparison <- list(c("BRCAmut", "BRCAwt", "other_HRD"))
+sting_count <- sting_count[order(sting_count$HRD_cat),]
+
+
+library(ggpubr)
+p <- ggboxplot(sting_count, x = "HRD_cat", y = "sting_tumor_ratio",
+               fill = "HRD_cat", 
+               palette = c(HRD_color, "grey"),
+               add = "jitter")
+
+#png("./Figures/STING_germline_tumorcells_wilcoxtest.png", units = "in", height = 8, width = 8, res = 600)
+p + stat_compare_means(comparisons = germline_comparison, 
+                       method = "wilcox.test",  size = 8) +
+  theme(text = element_text(size = 15),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top",
+        plot.margin = margin(1, 1, 1, 1, "cm"),
+        panel.border = element_rect(colour = "black", fill=NA, linewidth=0.5)) +
+  ylab("STING+/Tumor cells %") +
+  labs(fill = "")
+#dev.off()
+```
+
+# Figure 5.E - nearest neighbor analysis
+```{r message=FALSE}
+
+# the file below was created with this script data_wrangle_NN copy.ipynb
+
+melt_tissue <- read.csv("./Data_for_paper_figures/NN_K5n15_tissue_melt_122623.csv")
+
+
+melt_tissue_filt <- filter(melt_tissue, neighborhood %in% c(1,5,8,10,13))
+melt_tissue_filt <- separate(melt_tissue_filt, prim_HRD, into = c("HRD_status", "recurrent"), sep = "_")
+melt_tissue_filt$frequency.of.neighborhood <- log(melt_tissue_filt$frequency.of.neighborhood+1)
+
+melt_tissue_filt <- melt_tissue_filt[order(melt_tissue_filt$neighborhood),]
+melt_tissue_filt <- mutate(melt_tissue_filt, neighborhood = as.character(neighborhood))
+
+melt_tissue_filt <- mutate(melt_tissue_filt, neighborhood = as.factor(neighborhood))
+melt_tissue_filt$neighborhood <- factor(melt_tissue_filt$neighborhood, levels = unique(melt_tissue_filt$neighborhood))
+
+melt_tissue_filt$neighborhood_cat <- "STING+ Tumor cells"
+#melt_tissue_filt$neighborhood_cat[grep("5", melt_tissue_filt$neighborhood)] <- "STING+ Tumor & STING-/ERAP1- Tumor cells only"
+melt_tissue_filt$neighborhood_cat[grep("8", melt_tissue_filt$neighborhood)] <- "ERAP1+ Tumor cells"
+melt_tissue_filt$neighborhood_cat[grep("10", melt_tissue_filt$neighborhood)] <- "Helper T cells"
+melt_tissue_filt$neighborhood_cat[grep("13", melt_tissue_filt$neighborhood)] <- "M1 Macrophages"
+
+melt_tissue_filt <- melt_tissue_filt[order(melt_tissue_filt$HRD_status),]
+melt_tissue_filt <- mutate(melt_tissue_filt, HRD_status = as.factor(HRD_status))
+
+melt_tissue_filt$HRD_status <- factor(melt_tissue_filt$HRD_status, levels = unique(melt_tissue_filt$HRD_status))
+HRD_color <- c("#AA323F",'#286D97')
+recur_color <- c("#f97c03",'#5e4fa2')
+
+#png("./Figures/NN_boxplots_HRD.png", units = "in", height = 3, width = 6, res = 600)
+ggplot(melt_tissue_filt, aes(x = neighborhood_cat, y = frequency.of.neighborhood, fill = HRD_status)) +
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(position = position_dodge(width = 0.75)) +
+  theme_bw() +
+  scale_fill_manual(values = HRD_color)+
+  theme(legend.position = 'none') +
+  labs(y = "", x = "") + ylim(c(0,0.5))
+#dev.off()
+
+#png("./Figures/NN_boxplots_recur.png", units = "in", height = 3, width = 6, res = 600)
+ggplot(melt_tissue_filt, aes(x = neighborhood_cat, y = frequency.of.neighborhood, fill = recurrent)) +
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(position = position_dodge(width = 0.75)) +
+  theme_bw() +
+  scale_fill_manual(values = recur_color) +
+  theme(legend.position = 'none') +
+  labs(y = "", x = "")+ ylim(c(0,0.5))
+#dev.off()
+
+######################################################
+## calculating pvalues for comparisons
+######################################################
+
+
+#### comparing HRD_prim vs HRP_prim for all neighborhoods
+
+melt_tissue <- read.csv("./Data_for_paper_figures/NN_K5n15_tissue_melt_122623.csv")
+
+neighborhood_list <- unique(melt_tissue$neighborhood)
+pvalue_data_tissue <- tibble()
+
+
+for (i in 1:15) {
+  pvalue_data_tissue[i,1] <- (t.test((melt_tissue %>% filter(., prim_HRD == "HRD_Primary" | prim_HRD == "HRP_Primary") %>% 
+                                        filter(., neighborhood == neighborhood_list[i]))$frequency.of.neighborhood ~
+                                       (melt_tissue %>% filter(., prim_HRD == "HRD_Primary" | prim_HRD == "HRP_Primary") %>% 
+                                          filter(., neighborhood == neighborhood_list[i]))$prim_HRD))$p.value
+  
+}
+colnames(pvalue_data_tissue) <- "HRDvsHRP_prim_t.test"
+rownames(pvalue_data_tissue) <- neighborhood_list
+
+pvalue_data_tissue <- as.data.frame(pvalue_data_tissue)
+
+
+#### comparing HRD_recur vs HRP_recur for all neighborhoods
+for (i in 1:15) {
+  pvalue_data_tissue[i,2] <- (t.test((melt_tissue %>% filter(., prim_HRD == "HRD_Recurrent" | prim_HRD == "HRP_Recurrent") %>% 
+                                        filter(., neighborhood == neighborhood_list[i]))$frequency.of.neighborhood ~
+                                       (melt_tissue %>% filter(., prim_HRD == "HRD_Recurrent" | prim_HRD == "HRP_Recurrent") %>% 
+                                          filter(., neighborhood == neighborhood_list[i]))$prim_HRD))$p.value
+  
+}
+
+
+
+colnames(pvalue_data_tissue) <- c("HRDvsHRP_prim_t.test", "HRDvsHRP_recur_t.test")
+
+melt_tissue <- separate(melt_tissue, col = prim_HRD, into = c("HRD_status", "recur"), sep = "_")
+
+#### comparing HRD vs HRP for all neighborhoods
+for (i in 1:15) {
+  pvalue_data_tissue[i,3] <- (t.test((melt_tissue %>% filter(., neighborhood == neighborhood_list[i]))$frequency.of.neighborhood ~ 
+                                       (melt_tissue %>% filter(., neighborhood == neighborhood_list[i]))$HRD_status))$p.value
+  
+}
+
+#### comparing prim vs recurrent for all neighborhoods
+for (i in 1:15) {
+  pvalue_data_tissue[i,4] <- (t.test((melt_tissue %>% filter(., neighborhood == neighborhood_list[i]))$frequency.of.neighborhood ~ 
+                                       (melt_tissue %>% filter(., neighborhood == neighborhood_list[i]))$recur))$p.value
+  
+}
+
+
+colnames(pvalue_data_tissue) <- c("HRDvsHRP_prim_t.test", "HRDvsHRP_recur_t.test",
+                                  "HRDvsHRP_t.test", "recur_t.test")
+
+print(pvalue_data_tissue)
+```
+
+# Figure 5.F - spatial proximity analysis - boxplots
+```{r message=FALSE}
+# Bassem provided proximity boxplots
+```
+
+# Figure 5.G - circos plots for proximity analysis
+```{r message=FALSE}
+
+library(circlize)
+
+mean_distance <- read.csv("./Data_for_paper_figures/Mean_Distance_celltypes.csv")
+mean_distance <- column_to_rownames(mean_distance, "Row")
+mean_distance <- log(mean_distance+1)
+
+scan_metadata <- read.csv("./Data_for_paper_figures/Scan_metadata.csv")
+
+
+cell_type_pairs <- as.data.frame(rownames(mean_distance))
+colnames(cell_type_pairs) <- "cell_type_pairs"
+cell_type_pairs <- separate(cell_type_pairs, col = cell_type_pairs, into = c("cell1", "random", "cell2"), sep = "_")
+
+unique_cells <- as.data.frame(unique(cell_type_pairs$cell1))
+colnames(unique_cells) <- "cell_type"
+
+
+HRP_mean_dist <- mean_distance[,(filter(scan_metadata, HRD_status == "HRP" & recurNumber == 0))$Scan_ID]
+rownames(HRP_mean_dist) <- rownames(mean_distance)
+HRP_mean_dist$rowMean <- rowMeans(HRP_mean_dist, na.rm = T)
+
+HRP_mean_dist <- HRP_mean_dist[-c(which(is.nan(HRP_mean_dist$rowMean) == TRUE)),]
+
+HRP_mean_dist <- subset(HRP_mean_dist, select = c(rowMean))
+HRP_mean_dist <- rownames_to_column(HRP_mean_dist, "cell_pairs")
+HRP_mean_dist$HRD_status <- "HRP"
+
+HRD_mean_dist <- mean_distance[,(filter(scan_metadata, HRD_status == "HRD" & recurNumber == 0))$Scan_ID]
+rownames(HRD_mean_dist) <- rownames(mean_distance)
+HRD_mean_dist$rowMean <- rowMeans(HRD_mean_dist, na.rm = T)
+
+HRD_mean_dist <- HRD_mean_dist[-c(which(is.nan(HRD_mean_dist$rowMean) == TRUE)),]
+HRD_mean_dist <- subset(HRD_mean_dist, select = c(rowMean))
+HRD_mean_dist <- rownames_to_column(HRD_mean_dist, "cell_pairs")
+HRD_mean_dist$HRD_status <- "HRD"
+
+# 17 connections based on boxplot
+HRD_mean_dist <- filter(HRD_mean_dist, cell_pairs %in% c("Cytotoxic T cells_to_B cells", "M1 Macrophages_to_B cells",
+                                                         "M1 Macrophages_to_Cytotoxic T cells",
+                                                         "B cells_to_Dendritic cells", "M1 Macrophages_to_Endothelial cells",
+                                                         "M1 Macrophages_to_Fibroblasts", "M1 Macrophages_to_Helper T cells (other)",
+                                                         "M1 Macrophages_to_M1 Macrophages", "Endothelial cells_to_M2 Macrophages",
+                                                         "M1 Macrophages_to_M2 Macrophages", "Endothelial cells_to_Regulatory T cells (Tregs)",
+                                                         "M1 Macrophages_to_Regulatory T cells (Tregs)", "B cells_to_Tumor cells ERAP1+",
+                                                         "Endothelial cells_to_Tumor cells ERAP1+", "M1 Macrophages_to_Tumor cells ERAP1+", 
+                                                         "Endothelial cells_to_Tumor cells ERAP1-", "Endothelial cells_to_Tumor cells STING+"))
+
+HRD_mean_dist <- separate(HRD_mean_dist, col = cell_pairs, into = c("cell1", "random", "cell2"),
+                          sep = "_")
+
+#temp_combined <- rbind(HRD_mean_dist, HRP_mean_dist)
+
+unique_cells <- filter(unique_cells, !cell_type %in% c("Tumor cells", "Double negative T cells",
+                                                       "Epithelial cells", "Monocytes", "NK cells"))
+
+unique_cells$cell_type[grep("Tregs", unique_cells$cell_type)] <- "Regulatory T cells"
+#temp_combined$cell2[grep("Regulatory T cells", temp_combined$cell2)] <- "Regulatory T cells"
+
+
+hex_color <- "#AA323F"  # Your original color
+rgb_vals <- col2rgb(hex_color) / 255  # Convert to RGB and normalize (0 to 1 scale)
+transparent_color <- rgb(rgb_vals[1], rgb_vals[2], rgb_vals[3], alpha = 0.03)  # Add 50% transparency
+
+hex_color2 <- "#286D97"  # Your original color
+rgb_vals2 <- col2rgb(hex_color2) / 255  # Convert to RGB and normalize (0 to 1 scale)
+transparent_color2 <- rgb(rgb_vals2[1], rgb_vals2[2], rgb_vals2[3], alpha = 0.03)  # Add 50% transparency
+
+group_colors <- setNames(c(transparent_color,transparent_color2), c("HRD", "HRP")) 
+
+
+#### HRD only plot
+HRD_mean_dist$cell2[grep("Regulatory T cells", HRD_mean_dist$cell2)] <- "Regulatory T cells"
+
+
+
+
+#png("circos_akoya_HRD.png", units = "in", height = 8, width = 8, res = 600)
+circos.par("points.overflow.warning" = FALSE)
+circos.initialize(unique_cells$cell_type, xlim = c(0, 1))
+circos.track(factors = unique_cells$cell_type, ylim = c(0, 1), panel.fun = function(x, y) {
+  circos.text(CELL_META$xcenter, CELL_META$ylim[1] + 0.5, CELL_META$sector.index, 
+              cex = 0.8, facing = "inside")
+  # Add other plotting functions here if needed
+  for(i in 1:nrow(HRD_mean_dist)) {
+    from_sector <- HRD_mean_dist$cell1[i]
+    to_sector <- HRD_mean_dist$cell2[i]
+    value <- HRD_mean_dist$rowMean[i]
+    group <- HRD_mean_dist$HRD_status[i]
+    link_color <- group_colors[group]
+    
+    # Create the link
+    circos.link(from_sector,c(0.25, 0.75), to_sector, c(0.4375, 0.5625), 
+                lwd = 2, col = link_color, directional = 1, arr.width = 0.15)
+  }
+  
+})
+#dev.off()
+
+##### HRP only
+HRP_mean_dist <- filter(HRP_mean_dist, cell_pairs %in% c("Dendritic cells_to_Cytotoxic T cells", "Dendritic cells_to_Dendritic cells",
+                                                         "Dendritic cells_to_Endothelial cells", 
+                                                         "Dendritic cells_to_Helper T cells (other)", 
+                                                         "Dendritic cells_to_M2 Macrophages",
+                                                         "Dendritic cells_to_Regulatory T cells (Tregs)", "Dendritic cells_to_Smooth muscle cells",
+                                                         "Fibroblasts_to_Smooth muscle cells",
+                                                         "Dendritic cells_to_Tumor cells ERAP1+",
+                                                         "Dendritic cells_to_Tumor cells ERAP1-", "Dendritic cells_to_Tumor cells STING-",
+                                                         "Tumor cells STING-_to_Dendritic cells"))
+
+
+HRP_mean_dist <- separate(HRP_mean_dist, col = cell_pairs, into = c("cell1", "random", "cell2"),
+                          sep = "_")
+
+HRP_mean_dist$cell2[grep("Regulatory T cells", HRP_mean_dist$cell2)] <- "Regulatory T cells"
+
+#png("circos_akoya_HRP.png", units = "in", height = 8, width = 8, res = 600)
+circos.par("points.overflow.warning" = FALSE)
+circos.initialize(unique_cells$cell_type, xlim = c(0, 1))
+circos.track(factors = unique_cells$cell_type, ylim = c(0, 1), panel.fun = function(x, y) {
+  circos.text(CELL_META$xcenter, CELL_META$ylim[1] + 0.5, CELL_META$sector.index, 
+              cex = 0.8, facing = "inside")
+  # Add other plotting functions here if needed
+  for(i in 1:nrow(HRP_mean_dist)) {
+    from_sector <- HRP_mean_dist$cell1[i]
+    to_sector <- HRP_mean_dist$cell2[i]
+    value <- HRP_mean_dist$rowMean[i]
+    group <- HRP_mean_dist$HRD_status[i]
+    link_color <- group_colors[group]
+    
+    # Create the link
+    circos.link(from_sector,c(0.25, 0.75), to_sector, c(0.4375, 0.5625), 
+                lwd = 2, col = link_color, directional = 1, arr.width = 0.15)
+  }
+  
+})
+#dev.off()
+
+```
+

@@ -1,0 +1,695 @@
+---
+title: "Figure 4"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r setup, include=FALSE}
+# TCR-seq analysis main folder: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_RNA-Seq/TCR_RNA_seq
+
+# results for TRUST4 are here which were used in the paper: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_RNA-Seq/TCR_RNA_seq/TRUST4
+
+# results for Bowtell data were generated here: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_RNA-Seq/TCR_RNA_seq/TRUST4/bowtell_TCR_seq
+
+# UMAP was generated on the GPU machine:
+#How to login to Cerberus:
+#ssh kruttika@10.226.39.63
+#Password: junkdnalab
+
+# for making the UMAPs, I tried multiple methods to generate it but the final results are here on the GPU machine: /local-data/kruttika/umap_akoya/immune_files/umap_immune.py (parameters were changed here to do scaling with max_value = 10, only immune cell markers were used and then normalized with harmony)
+
+
+```
+
+# load libraries
+```{r message=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(tidyverse)
+library(ComplexHeatmap)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(factoextra)
+
+```
+
+# code for how the clonotype counts and RNA-seq data were combined - this chunk of code was not run
+```{r message=FALSE, eval=FALSE}
+
+clonotype_count <- read_excel("./Data_for_paper_figures/Clonotype_count_POCROC.xlsx")
+colnames(clonotype_count) <- c("RNA_sample", "Clonotype_count", "sample")
+
+clonotype_count$temp <- clonotype_count$RNA_sample
+
+clonotype_count <- separate(clonotype_count, col = temp, into = c("sample", "TCR"), sep = "\\.")
+clonotype_count <- separate(clonotype_count, col = sample, into = c("Patient_ID", "Tissue_ID", "site"), sep = "-")
+clonotype_count <- separate(clonotype_count, col = Patient_ID, into = c("Patient_ID", "Tissue"), sep = "_")
+clonotype_count$Tissue_ID <- ifelse(is.na(clonotype_count$Tissue_ID) == TRUE, clonotype_count$Tissue,
+                                    clonotype_count$Tissue_ID)
+
+#TCGA, RtOv, LN
+clonotype_count$Tissue_ID <- ifelse(clonotype_count$Tissue_ID == "TCGA", 
+                                    clonotype_count$Tissue, clonotype_count$Tissue_ID)
+clonotype_count$Tissue_ID <- ifelse(clonotype_count$Tissue_ID == "RtOv", 
+                                    clonotype_count$Tissue, clonotype_count$Tissue_ID)
+clonotype_count$Tissue_ID <- ifelse(clonotype_count$Tissue_ID == "LN", 
+                                    clonotype_count$Tissue, clonotype_count$Tissue_ID)
+clonotype_count$Tissue_ID2 <- paste(clonotype_count$Tissue_ID, clonotype_count$site, sep = "-")
+clonotype_count$Tissue_ID2 <- ifelse(is.na(clonotype_count$site) == TRUE, clonotype_count$Tissue_ID,
+                                     clonotype_count$Tissue_ID2)
+
+
+clonotype_count <- subset(clonotype_count, select = -c(Tissue, Tissue_ID, site))
+colnames(clonotype_count) <- c(colnames(clonotype_count)[-5], "Tissue_ID")
+
+image_results <- read.table("./Data_for_paper_figures/all_image_results_011623.txt",
+                            sep = "\t", header = T)
+
+setdiff(clonotype_count$Tissue_ID, image_results$Tissue_ID)
+
+image_results$Tissue_ID[grep("4601", image_results$Tissue_ID)] <- "4601"
+image_results <- mutate(image_results, Patient_ID = as.character(Patient_ID))
+
+clonotype_count <- left_join(clonotype_count, image_results) 
+sum(is.na(clonotype_count))
+clonotype_count <- na.omit(clonotype_count)
+# do not have image coordinates for 5105
+
+
+good.samples <- read.table("./Data_for_paper_figures/good.samples.tsv",
+                           sep = "\t", header = T)
+
+# always check: 21020, 22720-2547, 24892, 25236, 26862-4860, 30961, 48986
+good.samples$HRD_status[grep("48986", good.samples$patientID)] <- c("HRP", "HRP")
+good.samples$HRD_status[grep("2547", good.samples$tissueID)] <- "HRP"
+
+setdiff(good.samples$tissueID, clonotype_count$Tissue_ID)
+setdiff(clonotype_count$Tissue_ID, good.samples$tissueID)
+
+clonotype_count$Tissue_ID[grep("3209", clonotype_count$Tissue_ID)] <- "3209"
+clonotype_count$Tissue_ID[grep("1624", clonotype_count$Tissue_ID)] <- "1624"
+
+good.samples$tissueID[grep("1671", good.samples$tissueID)] <- c("1671-RtOv", "1671-Omm")
+good.samples$tissueID[grep("4416", good.samples$tissueID)] <- c("4416-RtLN", "4416-LtLN")
+
+clonotype_count$Tissue_ID[grep("2604", clonotype_count$Tissue_ID)] <- "2604"
+
+colnames(good.samples) <- c(colnames(good.samples)[1], "Patient_ID", "Tissue_ID",
+                            colnames(good.samples)[4:20])
+good.samples <- mutate(good.samples, Patient_ID = as.character(Patient_ID)) %>% 
+  mutate(., Tissue_ID = as.character(Tissue_ID))
+
+clonotype_count <- left_join(clonotype_count, good.samples, by = c("Patient_ID", "Tissue_ID"))
+
+sum(is.na(clonotype_count))
+
+# saving the RNA-seq data with imaging info, clonotype count and epitope count
+setdiff(clonotype_count$Tissue_ID, epitope_count$Tissue_ID)
+
+# 4601 and 2894 not processed for epitope count
+
+epitope_count$Tissue_ID[grep("3209", epitope_count$Tissue_ID)] <- "3209"
+clonotype_count <- left_join(clonotype_count, epitope_count, by = c("Patient_ID", "Tissue_ID"))
+clonotype_count <- clonotype_count[,-c(4,13:17,23,25:30,33)]
+sum(is.na(clonotype_count))
+
+#write.table(clonotype_count, "clonotype_image_epitope_RNA_no5105.txt",
+ #           sep = "\t", quote = F, col.names = T, row.names = F)
+```
+
+# Fig.4.A; Correlation hovernet and TCR-seq (n = 40) 
+```{r message=FALSE}
+
+library(ggplot2)
+image_clonotype <- read.table("./Data_for_paper_figures/clonotype_image_epitope_RNA_no5105.txt",
+                              sep = "\t", header = T)
+
+
+image_clonotype <- image_clonotype[-grep("1624",image_clonotype$Tissue_ID),]
+image_clonotype <- image_clonotype[-grep("1671-Omm",image_clonotype$Tissue_ID),]
+image_clonotype <- image_clonotype[-grep("4691",image_clonotype$Tissue_ID),]
+image_clonotype <- image_clonotype[-grep("3322",image_clonotype$Tissue_ID),]
+image_clonotype <- image_clonotype[-grep("4513",image_clonotype$Tissue_ID),]
+image_clonotype <- image_clonotype[-grep("3360",image_clonotype$Tissue_ID),]
+image_clonotype <- image_clonotype[-grep("4612",image_clonotype$Tissue_ID),]
+image_clonotype <- image_clonotype[-grep("4448",image_clonotype$Tissue_ID),]
+image_clonotype <- image_clonotype[-grep("4704",image_clonotype$Tissue_ID),]
+
+cor.test(image_clonotype$Clonotype_count, image_clonotype$Necrosis) # r=0.22, p-value = 0.18
+cor.test(image_clonotype$Clonotype_count, image_clonotype$Inflammatory) # r=0.49, p-value = 0.0014
+cor.test(image_clonotype$Clonotype_count, image_clonotype$Connective) # r=0.21, p-value = 0.19
+cor.test(image_clonotype$Clonotype_count, image_clonotype$Neoplastic) # r=-0.45, p-value = 0.0036
+
+p1 <- ggplot(image_clonotype, aes(x = Clonotype_count, y = Inflammatory, col = HRD_status)) +
+  geom_point(size = 4) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        legend.position = "None",
+        aspect.ratio = 1) +
+  scale_color_manual(values = c("#D53E4F", "#3288BD")) +
+  labs(x = "", y = "% of Inflammatory cells",
+       col = "HRD status") +
+  geom_smooth(method=lm , color="black", fill="grey", se=TRUE)
+
+
+p2 <- ggplot(image_clonotype, aes(x = Clonotype_count, y = Neoplastic, col = HRD_status)) +
+  geom_point(size = 4) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        legend.position = "None",
+        aspect.ratio = 1) +
+  scale_color_manual(values = c("#D53E4F", "#3288BD")) +
+  labs(x = "", y = "% of Neoplastic cells",
+       col = "HRD status") +
+  geom_smooth(method=lm , color="black", fill="grey", se=TRUE)
+
+p3 <- ggplot(image_clonotype, aes(x = Clonotype_count, y = Connective, col = HRD_status)) +
+  geom_point(size = 4) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        legend.position = "None",
+        aspect.ratio = 1) +
+  scale_color_manual(values = c("#D53E4F", "#3288BD")) +
+  labs(x = "Clonotype count", y = "% of Connective cells",
+       col = "HRD status") +
+  geom_smooth(method=lm , color="black", fill="grey", se=TRUE)
+
+p4 <- ggplot(image_clonotype, aes(x = Clonotype_count, y = Necrosis, col = HRD_status)) +
+  geom_point(size = 4) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        legend.position = "None",
+        aspect.ratio = 1) +
+  scale_color_manual(values = c("#D53E4F", "#3288BD")) +
+  labs(x = "Clonotype count", y = "% of Necrotic cells",
+       col = "HRD status") +
+  geom_smooth(method=lm , color="black", fill="grey", se=TRUE)
+
+
+#png("./figures/clonotype_inflamm.png", units = "in", height = 5, width = 5, res = 600)
+p1
+#dev.off()
+
+#png("./figures/clonotype_neoplastic.png", units = "in", height = 5, width = 5, res = 600)
+p2
+#dev.off()
+
+#png("./figures/clonotype_connective.png", units = "in", height = 5, width = 5, res = 600)
+p3
+#dev.off()
+
+#png("./figures/clonotype_necrotic.png", units = "in", height = 5, width = 5, res = 600)
+p4
+#dev.off()
+```
+
+# Fig.4.B-left panel; Morrisita horn index, point plot 
+```{r message=FALSE}
+morisita_idx_pocroc <- read.table("./Data_for_paper_figures/morisita_index_overlap.txt",
+                                  sep = "\t", header = T)
+morisita_idx_pocroc <- na.omit(morisita_idx_pocroc)
+
+my_comparisons <- list( c("HRD", "HRP"))
+
+
+morisita_idx_pocroc$log2_idx <- log2(morisita_idx_pocroc$morisita_idx+1)
+
+#png("./figures/TCR-seq_morisita_idx_POCROC.png", units = "in", height = 5, 
+    #width = 4, res = 600)
+ggplot(morisita_idx_pocroc, aes(x = HRD_status, y = morisita_idx, col = HRD_status)) +
+  geom_point(position = position_jitter(width = 0.15)) +
+  scale_color_manual(values = c("#AA323F", "#286D97")) +
+  theme_bw() +
+  theme(legend.position = 'None',
+        text = element_text(size = 25)) +
+  labs(y = "Morisita-Horn Index") +
+  ylim(c(-0.01,0.08))
+#dev.off()
+
+##### not run this code below
+
+#p <- ggviolin(morisita_idx_pocroc, x = "HRD_status", y = "morisita_idx", 
+ #             fill = "HRD_status", add = "boxplot", width = 1.5,
+  #            add.params = list(fill = NA, width = 0.05),
+   #           palette = c("#AA323F", "#286D97"),
+    #          ylab = "Morisita-Horn index")
+# Use only p.format as label. Remove method name.
+#png("./figures/TCR-seq_morisita_idx_POCROC.png", units = "in", height = 7, 
+ #   width = 6, res = 600)
+#p + geom_jitter(shape=16, position=position_jitter(0.02)) +
+ # stat_compare_means(comparisons = my_comparisons, 
+  #                   method = "t.test",  size = 8) +
+  #theme(text = element_text(size = 25),
+   #     axis.title.x = element_blank(),
+    #    axis.text.x = element_text(angle = 45, hjust = 1),
+     #   legend.position = "None",
+      #  panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+  #scale_y_continuous(breaks = seq(0, 0.4, by = 0.04)) +
+  #labs(fill = "")
+#dev.off()
+```
+
+# Fig.4.B-right panel; clonotype count overlap
+```{r message=FALSE}
+
+
+clonotype_overlap_pocroc <- read.table("./Data_for_paper_figures/clonotype_count_overlap.txt",
+                                       sep = "\t", header = T)
+clonotype_overlap_pocroc <- na.omit(clonotype_overlap_pocroc)
+my_comparisons <- list( c("HRD", "HRP"),
+                        c("HRD", "HRD-HRP"),
+                        c("HRP", "HRD-HRP"))
+
+
+
+p2 <- ggviolin(clonotype_overlap_pocroc, x = "group", fill = "group",
+               y = "clonotype_count", add = "boxplot", width = 1.15,
+               add.params = list(fill = NA, width = 0.05),
+               palette = c("#AA323F", "#286D97", "black"),
+               ylab = "# of shared clonotypes")
+# Use only p.format as label. Remove method name.
+#png("./figures/TCR-seq_shared_clonotype_POCROC.png", units = "in", 
+ #   height = 8, width = 6, res = 600)
+p2 + stat_compare_means(comparisons = my_comparisons, 
+                        method = "t.test",  size = 8) +
+  theme(text = element_text(size = 25),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "None",
+        panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+  labs(fill = "") +
+  scale_y_continuous(breaks = seq(0, 7, by = 1))
+#dev.off()
+```
+
+# Fig.4.C; immunarch shared clonotype counts HRD and HRP
+```{r message=FALSE}
+library(immunarch)
+library(assertthat)
+library(ggplot2)
+library(ggseqlogo)
+
+immdata_pocroc_trust4 <- repLoad("./immunarch_input_TRUST4_TRB/correct_format")
+
+
+
+imm_ov1 <- repOverlap(immdata_pocroc_trust4$data, .method = "public", .verbose = F)
+
+imm_ov1 <- as.data.frame(imm_ov1)
+imm_ov1[lower.tri(imm_ov1)] <- NA
+
+imm_ov1 <- rownames_to_column(imm_ov1, "pair1")
+
+imm_ov1_gather <- gather(imm_ov1, key = "pair2", value = "count", -pair1)
+imm_ov1_gather <- na.omit(imm_ov1_gather)
+
+# removing tissues with <= 1 clonotype identified
+imm_ov1_gather <- imm_ov1_gather[-grep("1624", imm_ov1_gather$pair1),]
+imm_ov1_gather <- imm_ov1_gather[-grep("2112", imm_ov1_gather$pair1),]
+imm_ov1_gather <- imm_ov1_gather[-grep("2883", imm_ov1_gather$pair1),]
+imm_ov1_gather <- imm_ov1_gather[-grep("2722", imm_ov1_gather$pair1),]
+
+
+imm_ov1_gather <- separate(imm_ov1_gather, col = pair1, into = c("patient", "random"),
+                           sep = "\\.")
+
+imm_ov1_gather <- separate(imm_ov1_gather, col = pair2, into = c("patient2", "random"),
+                           sep = "\\.")
+
+
+pair1 <- substring(imm_ov1_gather$patient, 7)
+pair2 <- substring(imm_ov1_gather$patient2, 7)
+
+
+#write.csv(unique(c(pair1, pair2)), "temp_tissue.csv")
+
+tissueID_HRD <- read.csv("./Data_for_paper_figures/temp_tissue.csv")
+
+imm_ov1_gather$pair1 <- pair1
+imm_ov1_gather$pair2 <- pair2
+
+
+pair1 <- substr(imm_ov1_gather$patient, 1,5)
+pair2 <- substr(imm_ov1_gather$patient2, 1,5)
+
+imm_ov1_gather$pair1_ID <- pair1 
+imm_ov1_gather$pair2_ID <- pair2 
+
+imm_ov1_gather_HRD <- filter(imm_ov1_gather, pair1 %in% (filter(tissueID_HRD, HRD_status == "HRD"))$tissueID & pair2 %in% (filter(tissueID_HRD, HRD_status == "HRD"))$tissueID)
+
+
+imm_ov1_gather_HRD$patient_cat <- "Interpatient"
+imm_ov1_gather_HRD$patient_cat[which(imm_ov1_gather_HRD$pair1_ID == imm_ov1_gather_HRD$pair2_ID)] <- "Intrapatient"
+
+imm_ov1_gather_HRD <- subset(imm_ov1_gather_HRD, select = c(count,pair1_ID, patient_cat))
+
+colnames(imm_ov1_gather_HRD) <- c("overlap_count", "PatientID", "patient_cat")
+
+
+imm_ov1_gather_HRP <- filter(imm_ov1_gather, pair1 %in% (filter(tissueID_HRD, HRD_status == "HRP"))$tissueID &
+                               pair2 %in% (filter(tissueID_HRD, HRD_status == "HRP"))$tissueID)
+
+imm_ov1_gather_HRP$patient_cat <- "Interpatient"
+imm_ov1_gather_HRP$patient_cat[which(imm_ov1_gather_HRP$pair1_ID == imm_ov1_gather_HRP$pair2_ID)] <- "Intrapatient"
+
+imm_ov1_gather_HRP <- subset(imm_ov1_gather_HRP, select = c(count,pair1_ID, patient_cat))
+
+colnames(imm_ov1_gather_HRP) <- c("overlap_count", "PatientID", "patient_cat")
+
+#png("HRD_TCR_inter_intra.png", units = "in", height = 5, 
+ #3   width = 5, res = 600)
+ggplot(imm_ov1_gather_HRD, aes(x = patient_cat, y = overlap_count, color = patient_cat)) +
+  geom_point(size = 2.5,position = position_jitter(width = 0.15)) +
+  scale_color_manual(values = c('grey', "#fdae61")) +
+  theme_bw() +
+  ylim(c(-1.5,6)) + theme(legend.position = "none",
+                          text = element_text(size = 25)) +
+  labs(y="# shared clonotypes")
+#dev.off()
+
+#png("HRP_TCR_inter_intra.png", units = "in", height = 5, 
+ #   width = 5, res = 600)
+ggplot(imm_ov1_gather_HRP, aes(x = patient_cat, y = overlap_count, color = patient_cat)) +
+  geom_point(size = 2.5,position = position_jitter(width = 0.15)) +
+  scale_color_manual(values = c('grey', "#fdae61")) +
+  theme_bw() +
+  ylim(c(-1.5,6)) + theme(legend.position = "none",
+                          text = element_text(size = 25)) +
+  labs(y="# shared clonotypes")
+#dev.off()
+
+t.test(imm_ov1_gather_HRD$overlap_count ~ imm_ov1_gather_HRD$patient_cat)
+t.test(imm_ov1_gather_HRP$overlap_count ~ imm_ov1_gather_HRP$patient_cat)
+```
+
+# Fig.4.D; survival curve clonotype diversity
+```{r message=FALSE}
+patient_survival <- read.csv("./Data_for_paper_figures/Patient_survival.csv")
+colnames(patient_survival) <- c("patientID", "time_to_death")
+good.samples <- read.table("./Data_for_paper_figures/good.samples.tsv",
+                           sep = "\t", header = T)
+
+good.samples$HRD_status[grep("48986", good.samples$patientID)] <- c("HRP", "HRP")
+good.samples$HRD_status[grep("22720", good.samples$patientID)] <- c("HRP", "HRP")
+
+clonotype_count_pocroc <- read.table("./Data_for_paper_figures/clonotype_count_POCROC.txt",
+                                     sep = "\t", header = T)
+metadata_pocroc <- read.table("./immunarch_input_TRUST4_TRB/correct_format/metadata.txt", sep = "\t", header = T)
+
+clonotype_count_pocroc <- left_join(clonotype_count_pocroc, metadata_pocroc)
+clonotype_count_pocroc <- left_join(clonotype_count_pocroc, good.samples)
+
+div_gini <- read.table("./Data_for_paper_figures/gini_index_POCROC.txt", sep = "\t", header = T)
+setdiff(div_gini$Sample, clonotype_count_pocroc$Sample)
+colnames(div_gini) <- c("Sample", "Gini_index")
+
+clonotype_count_pocroc <- left_join(clonotype_count_pocroc, div_gini)
+
+clonotype_count_mean <-  clonotype_count_pocroc %>% group_by(patientID) %>% 
+  summarise(Mean_count = mean(Gini_index))
+
+clonotype_count_mean$clonotype_high_low <- ifelse(clonotype_count_mean$Mean_count < summary(clonotype_count_mean$Mean_count)[[2]],
+                                                  "Low clonotype diversity", "High clonotype diversity")
+
+clonotype_count_mean <- left_join(clonotype_count_mean, patient_survival)
+clonotype_count_mean$censored <- 1
+clonotype_count_mean$censored[grep("Alive", clonotype_count_mean$time_to_death)] <- 0
+
+clonotype_count_mean$time_to_death[grep("0", clonotype_count_mean$censored)] <- "7300"
+
+
+clonotype_count_mean[,grep("death", colnames(clonotype_count_mean))] <- lapply(grep("death", colnames(clonotype_count_mean)), 
+                                                                               function(x) as.numeric(clonotype_count_mean[[x]]))
+
+clonotype_count_mean$time_to_death <- clonotype_count_mean$time_to_death/365
+
+
+library(survminer)
+library(survival)
+surv_object <- Surv(time = clonotype_count_mean$time_to_death,
+                    event = clonotype_count_mean$censored)
+fit1 <- survfit(surv_object ~ clonotype_high_low, data = clonotype_count_mean)
+
+#png("./figures/TCR-seq_surv_avg_gini_index.png", units = "in", 
+ #   height = 8, width = 10, res = 600)
+ggsurvplot(fit1, data = clonotype_count_mean, pval = TRUE, risk.table = TRUE,
+           palette = c("#5CBD9F", "#5e4fa2"), 
+           font.tickslab = c(20),
+           legend.labs=c("High clonotype diversity", "Low clonotype diversity"),
+           legend.title = "",
+           ggtheme = theme_classic2(base_size=20, base_family = "Arial"),
+           font.family = "Arial") +
+  labs(x = "Time (days)")
+#dev.off()
+
+# mean/sum clonotype count with low considered as below first quandrant p value 0.06 for survival
+#mean gini index with low considered as below first quandrant p value 0.029 for survival
+```
+
+# Fig.4.E- left panel; epitope count POCROC 
+```{r message=FALSE}
+epitope_count <- read_excel("./Data_for_paper_figures/epitope_count_011623.xlsx")
+
+epitope_count$prim_recur <- "Recurrent"
+
+epitope_count$prim_recur[grep("Primary", epitope_count$Tumor)] <- "Primary"
+
+epitope_count$prim_HRD <- paste(epitope_count$prim_recur, epitope_count$HRD, sep = "-")
+
+my_comparisons <- list( c("Primary-HRD", "Recurrent-HRD"),
+                        c("Primary-HRP", "Recurrent-HRP"),
+                        c("Primary-HRD", "Primary-HRP"),
+                        c("Recurrent-HRD", "Recurrent-HRP"))
+
+epitope_count <- epitope_count[order(epitope_count$prim_HRD),]
+
+p <- ggboxplot(epitope_count, x = "prim_HRD", y = "epitope count",
+               fill = "prim_HRD", palette = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD'),
+               add = "jitter",
+               ylab = "Epitope count")
+
+#png("./figures/epitope_count_prim_HRD.png", units = "in", height = 10, 
+ #   width = 12, res = 600)
+p + stat_compare_means(comparisons = c(my_comparisons), 
+                       method = "t.test",  size = 8) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        panel.border = element_rect(colour = "black", fill=NA, size=0.5),
+        legend.position = "top") +
+  labs(fill = "")
+#dev.off()
+```
+
+# Fig.4.E- right panel; epitope count PCAWG
+```{r message=FALSE}
+pcawg_neo <- read.table("./Data_for_paper_figures/TestPCAWG.txt", sep = "\t", header = T)
+
+table(pcawg_neo$HRD)
+
+HRD_colors <- c("#AA323F",'#286D97')
+
+library(ggpubr)
+comparison_HRD <- list(c("HRD", "HRP"))
+
+p <- ggboxplot(pcawg_neo, x = "HRD", y = "epitope.count",
+               fill = "HRD", palette = HRD_colors,
+               add = "jitter",
+               ylab = "PCAWG Epitope Count")
+
+#png("./figures/PCAWG_neoantigen_HRD.png", units = "in", height = 6, 
+ #   width = 6, res = 600)
+p + stat_compare_means(comparisons = comparison_HRD, 
+                       method = "wilcox.test",  size = 8, ylab = 2400) +
+  theme(text = element_text(size = 15),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top") +
+  labs(fill = "") + ylim(c(200, 2500))
+#dev.off()
+```
+
+# loading proteomics data
+```{r message=FALSE}
+source("Read_proteomics_data.R")
+
+```
+
+# Figure 4.F - ERAP1 correlation with epitope count
+```{r message=FALSE}
+epitope_count <- read_excel("./Data_for_paper_figures/epitope_count_011623.xlsx")
+
+epitope_count$prim_recur <- "Recurrent"
+
+epitope_count$prim_recur[grep("Primary", epitope_count$Tumor)] <- "Primary"
+
+epitope_count$prim_HRD <- paste(epitope_count$prim_recur, epitope_count$HRD, sep = "-")
+
+coldata_prot_tumor <- filter(coldata_prot, re_classify == "Tumor")
+
+setdiff(coldata_prot_tumor$Tissue_ID, epitope_count$Tissue_ID)
+
+coldata_prot_tumor$Tissue_ID[grep("1624", coldata_prot_tumor$Tissue_ID)] <- "1624-D"
+coldata_prot_tumor$Tissue_ID[grep("2604", coldata_prot_tumor$Tissue_ID)] <- c("2604-RtOv", "2604-LtOv") 
+coldata_prot_tumor$Tissue_ID[grep("4416", coldata_prot_tumor$Tissue_ID)] <- c("4416-RtLN") 
+coldata_prot_tumor$Tissue_ID[grep("1671", coldata_prot_tumor$Tissue_ID)] <- c("1671-Omm", "1671-RtOv") 
+coldata_prot_tumor$Tissue_ID[grep("2105", coldata_prot_tumor$Tissue_ID)] <- "2105-C"
+coldata_prot_tumor$Tissue_ID[grep("4336", coldata_prot_tumor$Tissue_ID)] <- "4336-B"
+coldata_prot_tumor$Tissue_ID[grep("4612", coldata_prot_tumor$Tissue_ID)] <- "4612-B"
+coldata_prot_tumor$Tissue_ID[grep("4077", coldata_prot_tumor$Tissue_ID)] <- "4077-B"
+coldata_prot_tumor$Tissue_ID[grep("3209", coldata_prot_tumor$Tissue_ID)] <- "3209-TCGA-B"
+coldata_prot_tumor$Tissue_ID[grep("4860", coldata_prot_tumor$Tissue_ID)] <- "4860-B"
+coldata_prot_tumor$Tissue_ID[grep("4315", coldata_prot_tumor$Tissue_ID)] <- "4315-LN"
+coldata_prot_tumor$Tissue_ID[grep("2562", coldata_prot_tumor$Tissue_ID)] <- c("2562-RtOv", "2562-RtOv") 
+
+coldata_prot_tumor <- rownames_to_column(coldata_prot_tumor, "sample")
+coldata_prot_tumor <- left_join(coldata_prot_tumor, epitope_count)
+
+sum(is.na(coldata_prot_tumor))
+
+coldata_prot_tumor <- na.omit(coldata_prot_tumor) # 4601 epitope count not quantified
+
+prot_data_erap1 <- as.data.frame(t((filter(prot_data, rownames(prot_data) == "ERAP1_HUMAN"))))
+
+prot_data_erap1 <- rownames_to_column(prot_data_erap1, "sample")
+
+coldata_prot_tumor <- left_join(coldata_prot_tumor, prot_data_erap1)
+
+
+cor.test(coldata_prot_tumor$ERAP1_HUMAN, coldata_prot_tumor$`epitope count`)
+
+coldata_prot_tumor <- coldata_prot_tumor[order(coldata_prot_tumor$prim_HRD),]
+
+#png("./figures/ERAP1_epitope_count.png", units = "in", height = 5, width = 6, res = 600)
+ggplot(coldata_prot_tumor, aes(y = ERAP1_HUMAN, x = `epitope count`, col = prim_HRD)) +
+  geom_point(size = 4) +
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        aspect.ratio = 1) +
+  scale_color_manual(values = c("#AA323F", '#286D97', "#E99DA5",'#96C2DD')) +
+  labs(y = "ERAP1 log2(Protein intensity)", x = "Epitope count",
+       col = "") +
+  ggtitle("Pearson's correlation = -0.3; p-value = 0.025") +
+  geom_smooth(method=lm , color="black", fill="grey", se=TRUE)
+#dev.off()
+```
+
+# Fig.4.G; heatmap of cell phenotyping provided by Akoya 
+```{r message=FALSE, eval=FALSE}
+# this was provided by Bassem
+```
+
+# Fig.4.G - UMAPs
+```{r message=FALSE, eval=FALSE}
+## jupyter notebook named:UMAP_Figure4.G.ipynb for plotting the UMAPs
+```
+
+# Fig.4H - barplots to go below the UMAPs
+```{r message=FALSE}
+
+df <- read.table("./Data_for_paper_figures/merged_cell_summary_akoya.txt", sep = "\t", header = F) 
+colnames(df) <- c("cell_type", "raw_count", "norm_count", "accession_number")
+
+metadata <- read_csv("./Data_for_paper_figures/Akoya_sample_info_25slides_072023.csv")
+metadata <- as.data.frame(metadata)
+
+setdiff(metadata$accession_number, df$accession_number)
+setdiff(df$accession_number, metadata$accession_number)
+
+# S13-32894-G1 is labelled as S13-32894_G1 in the merged file
+# changing this specific accession number in the metadata file
+
+metadata[grep("S13-32894-G1", metadata$accession_number),1] <- "S13-32894_G1"
+setdiff(metadata$accession_number, df$accession_number)
+setdiff(df$accession_number, metadata$accession_number)
+
+df <- left_join(df, metadata)
+sum(is.na(df))
+
+### converting normalized counts (cell count/ total number of cells) to percentages
+df$norm_count <- df$norm_count*100
+
+group4_comparison <- list( c("Primary-HRD", "Primary-HRP"),
+                           c("Recurrent-HRD", "Recurrent-HRP"))
+group4_comparison_prim_recur <- list( c("Primary-HRD", "Recurrent-HRD"),
+                                      c("Primary-HRP", "Recurrent-HRP"))
+
+group4_comparison_germline <- list( c("Primary-BRCAmut", "Primary-BRCAwt"),
+                                    c("Recurrent-BRCAmut", "Recurrent-BRCAwt"))
+
+group2_HRD <- list( c("HRD", "HRP"))
+group2_prim_recur <- list( c("Primary", "Recurrent"))
+
+
+group4_color <- c("#AA323F",'#286D97', "#E99DA5",'#96C2DD')
+HRD_color <- c("#AA323F",'#286D97')
+recur_color <- c("#f97c03",'#5e4fa2')
+
+df_immune <- filter(df, !cell_type %in% c("Endothelial cells", "Fibroblasts", "Necrotic Tumor cells", "other",
+                                          "Smooth muscle cells", "Tumor cells", "Epithelial cells"))
+
+sum_celltype <- df_immune %>% group_by(cell_type) %>% summarize(sum_celltype = sum(raw_count))
+sum_celltype <- as.data.frame(sum_celltype)
+
+sum_celltype$ratios <- sum_celltype$sum_celltype/sum(sum_celltype$sum_celltype)
+sum_celltype$group <- "random"
+
+cell_type_col <-  c("B cells" ="#1f77b4", "Cytotoxic T cells" ="#ff7f0e","Dendritic cells"="#279e68",
+                    "Helper T cells"= "#d62728","M1 Macrophages"= "#17becf","M2 Macrophages" ="#8c564b",
+                    "Monocytes"= "#e377c2", "NK cells"="#b5bd61", 
+                    "T cells double negative"="#aec7e8", "Tregs"="#aa40fc")
+
+
+#png("immune_cells_total_barplot.png", units = "in", height = 12, width = 4, res = 300)
+ggplot(sum_celltype, aes(x = group, y = ratios, fill = cell_type)) + 
+  geom_col() +
+  scale_fill_manual(values = cell_type_col) +
+  theme_bw() +
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+#dev.off()
+
+
+df$patientID <- substr(df$POCROC_labels, 1,5)
+df_immune <- filter(df, !cell_type %in% c("Endothelial cells", "Fibroblasts", "Necrotic Tumor cells", "other",
+                                          "Smooth muscle cells", "Tumor cells", "Epithelial cells"))
+
+sum_patientID <- df %>% group_by(patientID) %>% summarize(sum_patientID = sum(raw_count))
+sum_patientID <- as.data.frame(sum_patientID)
+
+sum_patientID$ratios <- sum_patientID$sum_patientID/sum(sum_patientID$sum_patientID)
+sum_patientID$group <- "random"
+
+
+cell_type_col <-  c("18975s"="#018700",
+                    "16030"= "#d60000","22720"= "#00acc6",
+                    "25258"= "#ff7ed1", "24487"="#97ff00", "18915"="#8c3bff",
+                    "27561"="#6b004f", "30961"= "#ffa52f",
+                    "34001" = "#573b00", "40729" = "#005659",
+                    "41245" = "#0000dd", "41323" = "#00fdcf", "45097" = "#a17569")
+
+
+
+
+#png("immune_cells_patientID_total_barplot.png", units = "in", height = 12, width = 4, res = 300)
+ggplot(sum_patientID, aes(x = group, y = ratios, fill = patientID)) + 
+  geom_col() +
+  scale_fill_manual(values = cell_type_col) +
+  theme_bw() +
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+#dev.off()
+
+
+```
+

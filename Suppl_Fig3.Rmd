@@ -1,0 +1,523 @@
+---
+title: "Suppl.Fig.3"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# loading libraries
+```{r message=FALSE}
+
+######################################
+# each chunk in those script is able to run on its own but for some reason it was throwing errors while knitting the Rmarkdown - so I did not knit the Rmarkdown for this specific Rmarkdown
+
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(WGCNA)
+#BiocManager::install("tximport")
+library(tidyverse)
+library(tximport)
+library(rtracklayer)
+
+```
+
+# Suppl.Fig.3.A-CPTAC modules proteins   
+```{r message=FALSE}
+file.list <- paste0("/Users/dabkek/Dropbox/Kruttika_Folder/Jones_lab/r_studio_data_processing/Proteomics_Spatial_HGSOC/Compiled_code_021524/Data_for_paper_figures/WGCNA_tcga_data/", 
+                    list.files(path = "/Users/dabkek/Dropbox/Kruttika_Folder/Jones_lab/r_studio_data_processing/Proteomics_Spatial_HGSOC/Compiled_code_021524/Data_for_paper_figures/WGCNA_tcga_data/", pattern = "WGCNA_CPTAC", all.files = FALSE,
+                               full.names = FALSE, recursive = FALSE,
+                               ignore.case = FALSE, include.dirs = FALSE, no.. = FALSE))
+
+df.list <- lapply(file.list, read_excel)
+
+# filtering each table for correlations higher than 0.5
+cell_cell_comm <- as.data.frame(df.list[1])  %>% filter(., absolute.correlation > 0.5)
+complement <- as.data.frame(df.list[2])  %>% filter(., absolute.correlation > 0.5)
+cytokine_sign <- as.data.frame(df.list[3])  %>% filter(., absolute.correlation > 0.5)
+DNA_repl <- as.data.frame(df.list[4])  %>% filter(., absolute.correlation > 0.5)
+ECM <- as.data.frame(df.list[5]) %>% filter(., absolute.correlation > 0.5)
+erythrocyte_platelet <- as.data.frame(df.list[6]) %>% filter(., absolute.correlation > 0.5)
+metabolism <- as.data.frame(df.list[7]) %>% filter(., absolute.correlation > 0.5)
+
+prot_entrez <- read.table("/Users/dabkek/Dropbox/Kruttika_Folder/Jones_lab/r_studio_data_processing/POCROC_analysis_12_15/analysis/re-mapdia_msstats/prot_get_entrezID_5K_013023.txt", sep = "\t", header = T)
+prot_entrez %>% group_by(gene_id) %>% summarize(frequency = n()) %>% 
+  arrange(desc(frequency)) %>% filter(frequency > 1)
+
+prot_entrez <- prot_entrez[!duplicated(prot_entrez[,c("Entrez")]),]
+prot_entrez <- na.omit(prot_entrez)
+colnames(prot_entrez) <- c("uniprot",   "Protein",   "Entrez",    "gene.symbol", "gene_id")
+
+gtf_file <- file.path(file.path("./Data_for_paper_figures/WGCNA_tcga_data/gencode.v29.primary_assembly.annotation.gtf"))
+gencode_gtf <- rtracklayer::import(gtf_file)
+gene_type <- as.data.frame(mcols(gencode_gtf)[, c("type", "gene_id", "transcript_id", "gene_type", "transcript_type", "gene_name")])#; rm(gencode_gtf)
+g2t <- gene_type %>% dplyr::filter(type == "transcript") %>% dplyr::select(transcript_id, gene_id, gene_name)
+g2t <- as_tibble(unique(g2t))
+gene_name <- unique(g2t[, c("gene_id", "gene_name")])
+
+prot_ensmbl <- read.table("./Data_for_paper_figures/protein_5036_ensembl.tsv", sep = "\t", header = T)
+colnames(prot_ensmbl) <- c("Protein", "gene_id")
+prot_ensmbl <- prot_ensmbl[!duplicated(prot_ensmbl[,c("gene_id")]),]
+prot_ensmbl <- prot_ensmbl[!duplicated(prot_ensmbl[,c("Protein")]),]
+
+prot_ensmbl <- separate(prot_ensmbl, col = gene_id, into = c("gene_id", "version"), sep = "\\.")
+gene_name <- separate(gene_name, col = gene_id, into = c("gene_id", "version"), sep = "\\.")
+
+temp <- (filter(gene_name, gene_name %in% c(cell_cell_comm$gene.symbol, complement$gene.symbol, cytokine_sign$gene.symbol, DNA_repl$gene.symbol, 
+                                            ECM$gene.symbol, erythrocyte_platelet$gene.symbol, metabolism$gene.symbol)))$gene_id
+
+temp2 <- filter(gene_name, gene_id %in% temp)
+
+
+temp3 <- left_join(temp2, prot_ensmbl, by = "gene_id")
+
+prot_gene_name <- subset(temp3, select = c(Protein, gene_name))
+prot_gene_name <- na.omit(prot_gene_name)
+colnames(prot_gene_name) <- c("Protein", "gene.symbol")
+
+cell_cell_comm <- left_join(cell_cell_comm, prot_entrez)
+cell_cell_comm$module <- "cell_cell_comm"
+cell_cell_comm <- na.omit(cell_cell_comm)
+
+complement <- left_join(complement, prot_entrez)
+complement$module <- "complement"
+complement <- na.omit(complement)
+
+cytokine_sign <- left_join(cytokine_sign, prot_entrez)
+cytokine_sign$module <- "cytokine_sign"
+cytokine_sign <- na.omit(cytokine_sign)
+
+DNA_repl <- left_join(DNA_repl, prot_entrez)
+DNA_repl$module <- "DNA_repl"
+DNA_repl <- na.omit(DNA_repl)
+
+ECM <- left_join(ECM, prot_entrez)
+ECM$module <- "ECM"
+ECM <- na.omit(ECM)
+
+erythrocyte_platelet <- left_join(erythrocyte_platelet, prot_entrez)
+erythrocyte_platelet$module <- "erythrocyte_platelet"
+erythrocyte_platelet <- na.omit(erythrocyte_platelet)
+
+
+metabolism <- left_join(metabolism, prot_entrez)
+metabolism$module <- "metabolism"
+metabolism <- na.omit(metabolism)
+
+prot_modules <- rbind(cell_cell_comm, complement, cytokine_sign, DNA_repl,ECM,erythrocyte_platelet, metabolism)
+prot_modules <- na.omit(prot_modules) # 632
+
+source("Read_proteomics_data.R")
+prot_modules <- filter(prot_modules, Protein %in% rownames(prot_data_bpca))
+prot_modules$row_number <- 1:nrow(prot_modules)
+
+overlap_prot <- as.data.frame(prot_modules %>% group_by(Protein) %>% summarize(frequency = n()) %>% 
+                                arrange(desc(frequency)) %>% filter(frequency > 1))
+
+overlap_prot <- filter(prot_modules, Protein %in% overlap_prot$Protein)
+overlap_prot <- overlap_prot %>% group_by(Protein) %>% top_n(1, absolute.correlation)
+
+overlap_prot2 <- filter(prot_modules, Protein %in% overlap_prot$Protein)
+
+prot_modules <- filter(prot_modules, !row_number %in% setdiff(overlap_prot2$row_number, overlap_prot$row_number))
+
+## 515 overlapping proteins between CPTAC WGCNA and our imputed data POCROC
+# 515/762 proteins were identified in POCROC data (67.5%)
+
+
+prot_data_bpca_module <- filter(prot_data_bpca, rownames(prot_data_bpca) %in% prot_modules$Protein)
+prot_data_bpca_module <- prot_data_bpca_module[,colnames(prot_data_bpca_module) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+set.seed(4242)
+net_tumor_pearson = WGCNA::blockwiseModules(t(prot_data_bpca_module), 
+                                            # similarity matrix
+                                            corType = "pearson",
+                                            # adjacency matrix options
+                                            power = 6, 
+                                            networkType = "signed", 
+                                            # TOM options
+                                            TOMType = "signed",
+                                            # module identification options
+                                            maxBlockSize = 5100,
+                                            minModuleSize = 50,
+                                            pamRespectsDendro = FALSE,
+                                            saveTOMs = FALSE, deepSplit = 0,
+                                            verbose = 3)
+plotDendroAndColors(net_tumor_pearson$dendrograms[[1]], labels2colors(net_tumor_pearson$colors),
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Consensus gene dendrogram and module colors")
+
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(t(prot_data_bpca_module), labels2colors(net_tumor_pearson$colors))$eigengenes
+MEs = orderMEs(MEs0)
+
+########## metadata for WGCNA
+metadata <- subset(coldata_prot, select = c(prim_recur, recurNumber, HRD_HRP, avg_proportion, re_classify))
+metadata <- filter(metadata, re_classify == "Tumor")
+metadata <- subset(metadata, select = -c(re_classify))
+
+metadata$prim_recur[grep("Primary", metadata$prim_recur)] <- 0
+metadata$prim_recur[grep("Recurrent", metadata$prim_recur)] <- 1
+
+metadata$HRD_HRP[grep("HRD", metadata$HRD_HRP)] <- 0
+metadata$HRD_HRP[grep("HRP", metadata$HRD_HRP)] <- 1
+all(rownames(MEs0) == rownames(metadata))
+
+moduleTraitCor = cor(MEs, metadata, use = "p");
+
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, 59);
+
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                   signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+
+par(mar = c(6, 8.5, 3, 3));
+
+#png("./figures/WGCNA_CPTAC_tum_strm.png",height=8,width=10, res = 600,units = "in") 
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = c("Primary/Recurrent", "recurNumber", "HRD status", "Stromal content"),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = greenWhiteRed(50),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 1.5,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+#dev.off()
+
+brown_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="brown"]
+blue_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="blue"]
+turquoise_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="turquoise"]
+yellow_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="yellow"]
+green_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="green"]
+
+(filter(prot_entrez, Protein %in% brown_module))$Entrez
+
+CPTAC_module_list <- list(brown = (filter(prot_entrez, Protein %in% brown_module))$Entrez,
+                          blue = (filter(prot_entrez, Protein %in% blue_module))$Entrez,
+                          turquoise = (filter(prot_entrez, Protein %in% turquoise_module))$Entrez,
+                          yellow = (filter(prot_entrez, Protein %in% yellow_module))$Entrez,
+                          green = (filter(prot_entrez, Protein %in% green_module))$Entrez)
+
+ck <- compareCluster(geneCluster = CPTAC_module_list, fun = enrichKEGG)
+
+#png("./figures/WGCNA_CPTAC_kegg_pathway_013123.png",height=10,width=10, res = 600,units = "in") 
+dotplot(ck, show = 8)
+#dev.off()
+
+#write.table(ck@compareClusterResult, "WGCNA_CPTAC_kegg_pathway_013123.txt", sep = "\t",
+ #           quote = F, row.names = F, col.names = T)
+```
+
+# loading other libraries
+```{r message=FALSE}
+
+library(clusterProfiler)
+library(tidyverse)
+
+library(ComplexHeatmap)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(corrplot)
+library(colorspace)
+library(fgsea)
+library(org.Hs.eg.db)
+```
+
+# Suppl.Fig.3.B - POCROC WGCNA results with consensusclustering
+```{r message=FALSE}
+source("Read_proteomics_data.R")
+
+temp1 <- prot_data[,colnames(prot_data) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+temp1[is.na(temp1)] <- 0
+
+test3 <- temp1[apply(temp1 == 0, 1, sum) <= 12, ]
+
+# samples that are labelled as tumor- reclassified
+# proteins quantified in more than 80% of samples
+
+prot_data_bpca_module <- prot_data_bpca[rownames(prot_data_bpca) %in% rownames(test3),colnames(prot_data_bpca) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+most_variate_prot <- matrixStats::rowMads(as.matrix(prot_data_bpca_module))
+names(most_variate_prot) <- rownames(prot_data_bpca_module)
+most_variate_prot <- sort(most_variate_prot, decreasing = T)
+prot_data_bpca_module <- prot_data_bpca_module[names(most_variate_prot[1:1365]), ]
+prot_data_bpca_module <- as.data.frame(t(scale(t(prot_data_bpca_module))))
+
+set.seed(4242)
+net_tumor_pearson = WGCNA::blockwiseModules(t(prot_data_bpca_module), 
+                                            # similarity matrix
+                                            corType = "pearson",
+                                            # adjacency matrix options
+                                            power = 10, 
+                                            networkType = "signed", 
+                                            # TOM options
+                                            TOMType = "signed",
+                                            # module identification options
+                                            maxBlockSize = 5100,
+                                            minModuleSize = 50,
+                                            pamRespectsDendro = FALSE,
+                                            saveTOMs = FALSE, deepSplit = 0,
+                                            verbose = 3)
+plotDendroAndColors(net_tumor_pearson$dendrograms[[1]], labels2colors(net_tumor_pearson$colors),
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Consensus gene dendrogram and module colors")
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(t(prot_data_bpca_module), labels2colors(net_tumor_pearson$colors))$eigengenes
+MEs = orderMEs(MEs0)
+
+########## metadata for WGCNA
+coldata_prot_consensus_tum <- read.table("./Data_for_paper_figures/ConsensusCluster_coldata_k4_80222.txt",  sep = "\t", header = T)
+
+all(rownames(metadata) == rownames(coldata_prot_consensus_tum))
+
+k4 <- as.data.frame(coldata_prot_consensus_tum$cluster_group)
+k4$sample <- rownames(coldata_prot_consensus_tum)
+colnames(k4) <- c("cluster_group", "sample")
+
+
+k4$group1 <- ifelse(k4$cluster_group == 1, "1", "0")
+k4$group2 <- ifelse(k4$cluster_group == 2, "1", "0")
+k4$group3 <- ifelse(k4$cluster_group == 3, "1", "0")
+k4$group4 <- ifelse(k4$cluster_group == 4, "1", "0")
+
+all(rownames(metadata) == k4$sample)
+
+metadata$cluster1 <- k4$group1 
+metadata$cluster2 <- k4$group2 
+metadata$cluster3 <- k4$group3 
+metadata$cluster4 <- k4$group4 
+
+metadata <- subset(metadata, select = c(cluster1, cluster2, cluster3, cluster4,avg_proportion))
+
+all(rownames(MEs) == rownames(metadata))
+moduleTraitCor = cor(MEs, metadata, use = "p");
+
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, 59);
+
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                   signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+
+par(mar = c(6, 8.5, 3, 3));
+
+#c(colnames(metadata)[1:4],"Stromal content")
+#png("./figures/WGCNA_POCROC_tum_strm.png",height=6,width=8, res = 600,units = "in") 
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = c(colnames(metadata)),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = greenWhiteRed(50),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 1.5,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+#dev.off()
+
+brown_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="brown"]
+blue_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="blue"]
+turquoise_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="turquoise"]
+yellow_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="yellow"]
+green_module <- rownames(prot_data_bpca_module)[labels2colors(net_tumor_pearson$colors)=="green"]
+
+POCROC_module_list <- list(brown = (filter(prot_entrez, Protein %in% brown_module))$Entrez,
+                           blue = (filter(prot_entrez, Protein %in% blue_module))$Entrez,
+                           turquoise = (filter(prot_entrez, Protein %in% turquoise_module))$Entrez,
+                           yellow = (filter(prot_entrez, Protein %in% yellow_module))$Entrez,
+                           green = (filter(prot_entrez, Protein %in% green_module))$Entrez)
+
+ck <- compareCluster(geneCluster = POCROC_module_list, fun = enrichKEGG, pvalueCutoff=0.05)
+
+#png("./figures/WGCNA_POCROC_tumor_kegg_pathway_013123.png",height=16,width=12, res = 600,units = "in") 
+dotplot(ck, show = 15)
+#dev.off()
+
+#write.table(ck@compareClusterResult, "WGCNA_POCROC_kegg_pathway_013123.txt", sep = "\t",
+ #           quote = F, row.names = F, col.names = T)
+```
+
+# code to calculate cluster membership - this chunk of code was not run
+```{r message=FALSE, eval = FALSE}
+coldata_prot_consensus_tum <- subset(coldata_prot_consensus_tum, select = c(prim_recur, HRD_HRP, cluster_group))
+
+cluster_counts_HRD <- as.data.frame(table(coldata_prot_consensus_tum$cluster_group, coldata_prot_consensus_tum$HRD_HRP))
+colnames(cluster_counts_HRD) <- c("clusters", "HRD_status", "sample_counts")
+
+
+ggplot(cluster_counts_HRD, aes(x = clusters, y = sample_counts, fill = HRD_status)) +
+  geom_col()
+
+
+cluster_counts_primrecur <- as.data.frame(table(coldata_prot_consensus_tum$cluster_group, coldata_prot_consensus_tum$prim_recur))
+colnames(cluster_counts_primrecur) <- c("clusters", "prim_recur", "sample_counts")
+
+
+ggplot(cluster_counts_primrecur, aes(x = clusters, y = sample_counts, fill = prim_recur)) +
+  geom_col()
+
+#install.packages('fmsb')
+library(fmsb)
+
+x <- matrix(c(4,8,12,12), nrow = 2, byrow = TRUE)
+fisher.test(x)
+
+primary <- c(2, 1, 7)
+recurrent <- c(11, 14, 10)
+names(total) <- c("A", "B", "C")
+pairwise.fisher.test(smoker, total)
+
+
+data <- matrix(c(10,10,2,5,8,4,9,11), nrow = 4, byrow = TRUE)
+colnames(data) <- c("Primary", "Recurrent")
+rownames(data) <- c("Cluster1", "Cluster2", "Cluster3", "Cluster4")
+data <- t(data)
+
+
+prop.test(14, 20, p = 0.5)
+res
+
+prop.test(x = c(9,11), n = c(20,20))
+
+
+
+# Group 1 vs. Group 2 within the cluster
+group1 = 14
+group2 = 6
+total_group1 = 6  # total in Group 1
+total_group2 = 14   # total in Group 2
+# The matrix represents counts of Group 1 and Group 2
+mat = matrix(c(group1, total_group1, group2, total_group2),
+             nrow = 2,
+             byrow = TRUE,
+             dimnames = list(c("Group 1", "Group 2"), c("In Cluster", "Total")))
+# Perform Fisher's Exact Test
+fisher.test(mat)
+# Print the test result
+print(test_result)
+```
+
+
+```{r message=FALSE}
+patient_survival <- read.csv("./Data_for_paper_figures/Patient_survival.csv")
+
+colnames(patient_survival) <- c("Patient_ID", "Time_to_death")
+
+cluster_membership <- left_join(coldata_prot_consensus_tum, patient_survival)
+
+cluster_membership$censored <- "1"
+cluster_membership$censored[grep("Alive", cluster_membership$Time_to_death)] <- "0"
+
+cluster_membership$Time_to_death[grep("0", cluster_membership$censored)] <- "7300"
+
+cluster_membership[,grep("death", colnames(cluster_membership))] <- lapply(grep("death", colnames(cluster_membership)), function(x) as.numeric(cluster_membership[[x]]))
+
+cluster_membership$Time_to_death <- cluster_membership$Time_to_death/365
+cluster_membership[,grep("censored", colnames(cluster_membership))] <- lapply(grep("censored", colnames(cluster_membership)), function(x) as.numeric(cluster_membership[[x]]))
+
+cluster_membership_primary <- filter(cluster_membership, prim_recur == "Primary")
+
+table(cluster_membership_primary$cluster_group, cluster_membership_primary$Patient_ID)
+# 22421 - in cluster 1
+
+cluster_membership_primary$cluster_group[grep("22421", cluster_membership_primary$Patient_ID)] <- c(1,1)
+
+# 22421 - in cluster 4
+
+cluster_membership_primary$cluster_group[grep("22421", cluster_membership_primary$Patient_ID)] <- c(4,4)
+
+cluster_membership_primary <- cluster_membership_primary[!duplicated(cluster_membership_primary[,c("Patient_ID")]),]
+
+
+library(survival)
+library(survminer)
+
+surv_object <- Surv(time = cluster_membership_primary$Time_to_death,
+                    event = cluster_membership_primary$censored)
+
+
+fit1 <- survfit(surv_object ~ cluster_group, data = cluster_membership_primary)
+print(fit1)
+
+#png("./figures/survival_cluster.png",height=6,width=8, res = 600,units = "in") 
+ggsurvplot(fit1, data = cluster_membership_primary, pval = TRUE, risk.table = TRUE)
+#dev.off()
+
+```
+
+# Suppl.Fig.3.E - ANOVA
+```{r message=FALSE}
+
+source("Read_proteomics_data.R")
+temp1 <- prot_data[,colnames(prot_data) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+temp1[is.na(temp1)] <- 0
+
+test3 <- temp1[apply(temp1 == 0, 1, sum) <= 12, ]
+anova_data <- prot_data_bpca[rownames(prot_data_bpca) %in% rownames(test3),colnames(prot_data_bpca) %in% rownames(filter(coldata_prot, re_classify == "Tumor"))]
+
+
+anova_data <- as.data.frame(t(anova_data))
+all(rownames(anova_data) == rownames(filter(coldata_prot, re_classify == "Tumor")))
+
+anova_data$prim_recur <- as.factor((filter(coldata_prot, re_classify == "Tumor"))$prim_recur)
+anova_data$HRD_HRP <- as.factor((filter(coldata_prot, re_classify == "Tumor"))$HRD_HRP)
+
+
+
+df_phase <- tibble()
+for (i in 1:(ncol(anova_data)-2)) {
+  df_phase[i,1] <- summary(aov(anova_data[,i] ~ HRD_HRP * prim_recur, data = anova_data))[[1]][["Pr(>F)"]][1] # HRD/HRP
+  df_phase[i,2] <- summary(aov(anova_data[,i] ~ HRD_HRP * prim_recur, data = anova_data))[[1]][["Pr(>F)"]][2] # prim_Recur
+  df_phase[i,3] <- summary(aov(anova_data[,i] ~ HRD_HRP * prim_recur, data = anova_data))[[1]][["Pr(>F)"]][3] # interaction
+  
+}
+
+df_phase$Protein <- colnames(anova_data)[-c(2730:2731)]
+colnames(df_phase) <- c('HRD_HRP', "prim_recur", "Interaction","Protein")
+
+df_phase$pvalue_log10_HRD <- -1*log10(df_phase$HRD_HRP)
+df_phase$pvalue_log10_prim_recur <- -1*log10(df_phase$prim_recur)
+df_phase$pvalue_log10_interaction <- -1*log10(df_phase$Interaction)
+
+
+#install.packages("ggpointdensity")
+library(ggpointdensity)
+library(viridis)
+library(ggrepel)
+
+df_phase <- separate(df_phase, col = Protein, into = c("Protein"), sep = "_")
+
+#png("./figures/anova_suppl_fig.png", units = "in", height = 10, width = 10, res = 600)
+ggplot(df_phase, aes(x = pvalue_log10_prim_recur, y = pvalue_log10_HRD)) + 
+  geom_pointdensity() +
+  #xlim(0.00011,6) +
+  theme_bw() +
+  coord_fixed(ratio=1) +
+  scale_color_viridis() +
+  geom_label_repel(data = filter(df_phase, pvalue_log10_HRD > 4),
+                   aes(label = (filter(df_phase, pvalue_log10_HRD > 4))$Protein),
+                   nudge_x = 0.20, nudge_y = 0.05, size = 6) +
+  geom_label_repel(data = filter(df_phase, pvalue_log10_prim_recur > 2.5),
+                   aes(label = (filter(df_phase, pvalue_log10_prim_recur > 2.5))$Protein),
+                   nudge_x = 0.20, nudge_y = 0.05, size = 6) +
+  labs(x = "ANOVA -log10(p-value) (Primary/Recurrent status)", y = "ANOVA -log10(p-value) (HRD/HRP status)",
+       colour = "Density") +
+  theme(text = element_text(size = 25)) +
+  ylim(c(0,6.5)) + xlim(c(0,6.5))
+#dev.off()
+```
+

@@ -1,0 +1,390 @@
+---
+title: "Suppl_Fig1"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# information on the files needed in this script on HPC
+```{r message=FALSE}
+# the Tumor sv stroma DEA is here: /common/dabkek/re-NewAcquisition/tcga_style_mapdia_analysis_1-19-20/re-mapdia_msstats/tumor_stroma_DEA
+
+
+
+```
+
+# Load libraries for Figure 1
+```{r message=FALSE}
+library(readxl)
+library(tidyverse)
+library(ComplexHeatmap)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(DescTools)
+library(corrplot)
+library(colorspace)
+library(circlize)
+library(fgsea)
+```
+
+# Suppl Fig1.A - correlation heatmap
+```{r message=FALSE}
+prot_data_repl <- read.csv("./Data_for_paper_figures/protein_quant_BPCA_protlevel_pool_ms_filt_21121.csv")
+rownames(prot_data_repl) <- NULL
+prot_data_repl <- column_to_rownames(prot_data_repl, "X")
+#prot_data_repl <- round(prot_data_repl, 2)
+# SP84: has 2 replicates
+# SP101 has 3 replicates
+# SP97 has 2 replicates
+
+prot_data_repl <- prot_data_repl[,-c(grep("SP84", colnames(prot_data_repl)),
+                                     grep("SP101", colnames(prot_data_repl)),
+                                     grep("SP97", colnames(prot_data_repl))
+)]
+
+corr_all_repl <- cor(prot_data_repl, use="complete.obs")
+plot2 <- corrplot(as.matrix(corr_all_repl), method = "square", tl.pos='n',
+                  type = "upper", order = "hclust",
+                  hclust.method = "ward.D2")
+
+col_names_repl <- colnames(prot_data_repl)
+col_names_repl <- as.data.frame(col_names_repl)
+colnames(col_names_repl) <- "name"
+col_names_repl$sample <- col_names_repl$name
+
+col_names_repl <- separate(col_names_repl, col = "name",
+                           into = c("phase", "SP", "ext"), sep = "_")
+
+col_names_repl$replicate <- ifelse(col_names_repl$SP %in% col_names_repl$SP[which(!is.na(col_names_repl$ext) == TRUE)],
+                                   "Replicate", "No repl")
+
+col_names_repl$replicate[grep("pool", col_names_repl$phase)] <- "pool"
+
+col_names_repl <- subset(col_names_repl, select = c(replicate, sample))
+
+corr_all_repl_corplot <- corr_all_repl[rownames(plot2$corr), colnames(plot2$corr)]
+col_names_repl <- col_names_repl[order(match(col_names_repl[,2],colnames(corr_all_repl_corplot))),]
+
+all(col_names_repl$sample == colnames(corr_all_repl_corplot))
+all(col_names_repl$sample == rownames(corr_all_repl_corplot))
+
+corr_all_repl_corplot[upper.tri(corr_all_repl_corplot, diag=FALSE)] <- NA
+
+all(rownames(corr_all_repl_corplot) == rownames(plot2))
+all(colnames(corr_all_repl_corplot) == colnames(plot2))
+
+rownames(col_names_repl) <- NULL
+col_names_repl <- column_to_rownames(col_names_repl, "sample")
+all(colnames(corr_all_repl_corplot) == rownames(col_names_repl))
+
+condition_colors <- list(replicate = c('#ef8a62','#e0e0e0','#404040'))
+names(condition_colors$replicate) <- c("pool", "No repl", "Replicate")
+
+col_names_repl$replicate = factor(col_names_repl$replicate, levels = c("No repl", "Replicate", "pool"))
+
+colAnn <- HeatmapAnnotation(df=col_names_repl, which="col",
+                            col = condition_colors,
+                            annotation_width=unit(c(2, 8), "cm"), 
+                            show_annotation_name = FALSE,
+                            show_legend = FALSE,
+                            gap=unit(3, "mm"), annotation_name_gp= gpar(fontsize = 15))
+colAnn2 <- HeatmapAnnotation(df=col_names_repl, which="row",
+                             col = condition_colors,
+                             show_annotation_name = FALSE,
+                             annotation_width=unit(c(2, 8), "cm"), 
+                             gap=unit(3, "mm"), annotation_name_gp= gpar(fontsize = 15))
+
+blue_red <- sequential_hcl(9, "YlGnBu", rev = T)
+
+
+hmap1 <- Heatmap(
+  corr_all_repl_corplot,
+  #name = "Protein Intensity(log2)",
+  show_row_names = F,
+  show_column_names = F,
+  cluster_rows = F,
+  cluster_columns = F,
+  show_column_dend = F,
+  show_row_dend = T,
+  row_dend_reorder = T,
+  column_dend_reorder = T,
+  clustering_method_rows = "ward.D2",
+  clustering_method_columns = "ward.D2",
+  width = unit(100, "mm"), top_annotation=colAnn,
+  left_annotation = colAnn2,
+  column_title = "Pearson's correlation (hclust)",
+  na_col = "white", col = blue_red,
+  heatmap_legend_param = list(
+    title = "Pearson's Correlation",
+    title_position = "lefttop-rot"))
+
+#png("./figures/sample_corr_all_Fig1C.png", units = "in",height=5,width=5.5, res = 600) # change height and width parameter
+ht <- draw(hmap1, heatmap_legend_side="right", annotation_legend_side="left")
+#dev.off()
+
+#install.packages("DescTools")
+
+
+fisher_df <- FisherZ(corr_all_repl_corplot)
+fisher_df[fisher_df == Inf] <- NA
+
+range1 <- c(range(grep("SP83", rownames(col_names_repl)))[1],
+            range(grep("SP86", rownames(col_names_repl)))[1],
+            range(grep("SP87", rownames(col_names_repl)))[1],
+            range(grep("SP31", rownames(col_names_repl)))[1],
+            range(grep("SP30", rownames(col_names_repl)))[1],
+            range(grep("SP27", rownames(col_names_repl)))[1],
+            range(grep("SP88", rownames(col_names_repl)))[1],
+            range(grep("SP89", rownames(col_names_repl)))[1],
+            range(grep("SP36", rownames(col_names_repl)))[1],
+            range(grep("SP32", rownames(col_names_repl)))[1],
+            range(grep("SP33", rownames(col_names_repl)))[1])
+
+range2 <- c(range(grep("SP83", rownames(col_names_repl)))[2],
+            range(grep("SP86", rownames(col_names_repl)))[2],
+            range(grep("SP87", rownames(col_names_repl)))[2],
+            range(grep("SP31", rownames(col_names_repl)))[2],
+            range(grep("SP30", rownames(col_names_repl)))[2],
+            range(grep("SP27", rownames(col_names_repl)))[2],
+            range(grep("SP88", rownames(col_names_repl)))[2],
+            range(grep("SP89", rownames(col_names_repl)))[2],
+            range(grep("SP36", rownames(col_names_repl)))[2],
+            range(grep("SP32", rownames(col_names_repl)))[2],
+            range(grep("SP33", rownames(col_names_repl)))[2])
+
+repl_mean <- data.frame()
+for (i in 1:11) {
+  repl_mean[i,1] <- mean(as.matrix(fisher_df[c(range1[i]:range2[i]), 
+                                             c(range1[i]:range2[i])]), na.rm = T)
+  
+  mean_corr <- FisherZInv(repl_mean)
+  
+}
+
+mean_corr$group <- "1"
+mean_corr$sample <- stringi::stri_rand_strings(11, 3)
+
+#png("./figures/avg_corr_Fig1_C.png", units = "in",height=3,width=4, res = 600) # change height and width parameter
+ggplot(mean_corr, aes(x = sample, y = V1, fill = group)) +
+  geom_col(width = 0.5) +
+  theme_bw() +
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        legend.position = "none",
+        text = element_text(size = 20)) +
+  scale_fill_manual(values = "#404040") +
+  ylab(expression(atop("Average correlation", 
+                       paste("within replicates"))))
+#dev.off()
+```
+
+# Loading in proteomics data
+```{r message=FALSE}
+source("Read_proteomics_data.R")
+```
+
+# Suppl Fig 1.C
+```{r message=FALSE}
+#png("./figures/hist_stromal_score.png", units = "in", height = 5, width = 10, res = 600)
+ggplot(coldata_prot, aes(x = avg_proportion, fill = re_classify)) + 
+  geom_histogram(aes(y=..density..), binwidth=0.01) +
+  geom_density(alpha=0.4) + 
+  theme_bw() +
+  theme(axis.text = element_text(size = 20),
+        text = element_text(size = 20)) +
+  scale_fill_manual(values = c('#984ea3', '#ff7f00', '#386cb0')) +
+  labs(x = "Stromal score", y = "Density", fill = "Re-Classified")
+#dev.off()
+
+re_classify_summary <- as.data.frame(table(coldata_prot$strm_content, coldata_prot$re_classify))
+colnames(re_classify_summary) <- c("strm_content_path", "re_classified", "freq")
+
+re_classify_summary$re_classified <- factor(re_classify_summary$re_classified, levels =c("Tumor", "Mix", "Stroma"), ordered = TRUE)
+
+#png("./figures/re_classified_sample_dist.png", units = "in", height = 5, width = 10, res = 600)
+ggplot(re_classify_summary, aes(x = re_classified, y = freq, fill = strm_content_path)) +
+  geom_col(position = position_dodge()) +
+  geom_text(aes(label = freq), position = position_dodge(width = 0.9), vjust = -0.5) +
+  scale_fill_manual(values = c('#386cb0','#984ea3', '#ff7f00')) +
+  theme_bw() +
+  labs(x = "Re-Classified", y = "Sample Number", fill ="% stromal content\n(Path defined)") +
+  theme(axis.text = element_text(size = 20),
+        text = element_text(size = 20),
+        legend.title.align = 0.5,
+        legend.direction = "vertical",
+        legend.box.just = "center")
+#dev.off()
+```
+
+# Suppl fig.1.D tumor stroma heatmap reclassification  
+```{r message=FALSE}
+highlighted_prot <- read.csv("./Data_for_paper_figures/highlight_proteins_DEPs.csv")
+
+heatmap_data <- filter(prot_data_bpca, rownames(prot_data_bpca) %in% paste(highlighted_prot$From, "HUMAN", sep = "_"))
+
+coldata_prot <- rownames_to_column(coldata_prot, "sample")
+metadata <- subset(coldata_prot, select = c("sample","strm_content", "re_classify"))
+metadata <- column_to_rownames(metadata, "sample")
+
+all(rownames(metadata) == colnames(heatmap_data))
+
+colnames(metadata) <- c("Path defined", "Re-classified")
+
+condition_colors <- list(`Path defined` = c('#386cb0','#984ea3', '#ff7f00'),
+                         `Re-classified` = c('#386cb0','#984ea3', '#ff7f00'))
+
+
+names(condition_colors$`Path defined`) <- unique(metadata$`Path defined`)
+names(condition_colors$`Re-classified`) <- c("Tumor", "Mix", "Stroma")
+
+
+colAnn <- HeatmapAnnotation(df=metadata, which="col",
+                            col = condition_colors,
+                            annotation_width=unit(c(2, 8), "cm"), 
+                            gap=unit(3, "mm"), annotation_name_gp= gpar(fontsize = 15))
+all(colnames(heatmap_data) == rownames(metadata))
+
+heatmap_data <- as.data.frame(t(scale(t(heatmap_data))))
+
+heatmap_data <- rownames_to_column(heatmap_data, "Protein")
+heatmap_data <- separate(heatmap_data, col = "Protein", into = c("Protein", "remove"),
+                         sep = "_")
+
+heatmap_data <- subset(heatmap_data, select = -remove)
+heatmap_data <- column_to_rownames(heatmap_data, "Protein")
+
+col_fun = colorRamp2(c(-4, 0, 4), c("#2166ac", "#f7f7f7", "#b2182b"))
+
+hmap <- Heatmap(
+  as.matrix(heatmap_data),
+  #name = "Protein Intensity(log2)",
+  show_row_names = T,
+  show_column_names = F,
+  cluster_rows = T,
+  cluster_columns = T,
+  show_column_dend = TRUE,
+  show_row_dend = T,
+  row_dend_reorder = T,
+  column_dend_reorder = TRUE,
+  clustering_method_rows = "ward.D2",
+  clustering_method_columns = "ward.D2",
+  width = unit(100, "mm"), top_annotation=colAnn,
+  col = col_fun,
+  #column_title = "1363 most variable proteins",
+  heatmap_legend_param = list(
+    title = "z-score(Protein Intensity)",
+    title_position = "lefttop-rot"))
+
+#png("./figures/re_classified_supplfig1.F.png",height=6,width=13, res = 600,units = "in") # change height and width parameter
+ht = draw(hmap, heatmap_legend_side="left", annotation_legend_side="left")
+#dev.off()
+```
+
+# Suppl fig.1.E-F; Tumor stroma DEA, GSEA      
+```{r message=FALSE}
+mapdia_TvsS <- read.table("./Data_for_paper_figures/mapDIA_TvsS_91822.txt", sep = "\t", header = T)
+
+prot_entrez <- read.table("./Data_for_paper_figures/prot_get_entrezID_5K_013023.txt", sep = "\t", header = T)
+colnames(prot_entrez) <- c("Uniprot","Protein", "Entrez", "Gene", "Ensmbl")
+prot_entrez <- prot_entrez[!duplicated(prot_entrez[,c("Protein")]),]
+prot_entrez <- prot_entrez[!duplicated(prot_entrez[,c("Entrez")]),]
+
+
+data_mapdia <- function(data){
+  df <- data[-grep("iRT", data$Protein),]
+  
+  df <- separate(df, col = "Protein", into = c("a", "b", "Protein"),
+                 sep = "\\|")
+  
+}
+
+mapdia_TvsS <- data_mapdia(mapdia_TvsS)
+
+df <- mapdia_TvsS
+df <- separate(df, col = Protein, into = c("Protein", "a"), sep = "_")
+
+#png("./figures/TvsS_log2FC.png", units = "in", height = 7, width = 10, res = 600)
+ggplot(data = df, aes(y = log2FC, x = -1*log10(FDR))) + geom_point(size = 3, color = "grey") +
+  geom_point(data = filter(df, log2FC > 0.5) %>% filter(., FDR <= 0.01), color = "#382F61", size = 4) +
+  geom_point(data = filter(df, log2FC < -0.5) %>% filter(., FDR <= 0.01), color = "#88B083", size = 4) +
+  theme_bw() +
+  geom_label_repel(data = filter(df, log2FC > 1.5) %>% filter(., FDR <= 0.01),
+                   aes(label = (filter(df, log2FC > 1.5) %>% filter(., FDR <= 0.01))$Protein),
+                   nudge_x = -0.20, nudge_y = 0.05, size = 4) +
+  geom_label_repel(data = filter(df, log2FC < -1.5) %>% filter(., FDR <= 0.01),
+                   aes(label = (filter(df, log2FC < -1.5) %>% filter(., FDR <= 0.01))$Protein),
+                   nudge_x = -0.20, nudge_y = 0.05, size = 4) +
+  theme(panel.grid = element_blank(),
+        text = element_text(size = 20)) +
+  theme(axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  coord_flip(clip = "off")
+#dev.off()
+
+summary((filter(mapdia_TvsS, log2FC > 0.5) %>% filter(., FDR < .01))$Protein) #864
+summary((filter(mapdia_TvsS, log2FC < -0.5) %>% filter(., FDR < .01))$Protein) #269
+
+mapdia_TvsS_entrez <- left_join(mapdia_TvsS, prot_entrez)
+
+sum(is.na(mapdia_TvsS_entrez))
+
+mapdia_TvsS_entrez <- na.omit(mapdia_TvsS_entrez)
+
+pathways_reactome <- gmtPathways("./Data_for_paper_figures/c2.cp.reactome.v2022.1.Hs.entrez.gmt")
+
+pathway_subgroup <- function(data_df){
+  ranks_df <- data_df$log2FC
+  names(ranks_df) <- data_df$Entrez
+  set.seed(4242)
+  fgseaRes_df <- fgseaMultilevel(pathways_reactome, ranks_df, minSize=1, maxSize = Inf, nPermSimple = 10000)
+  fgseaRes_df <- na.omit(fgseaRes_df)
+  
+}
+
+fgsea_res_TvsS <- pathway_subgroup(mapdia_TvsS_entrez)
+fgsea_res_TvsS_filter <- filter(fgsea_res_TvsS, padj < 0.05) #83 pathways
+
+fgsea_res_TvsS_filter <- fgsea_res_TvsS_filter[order(fgsea_res_TvsS_filter$NES, decreasing = T),]
+
+fgsea_res_TvsS_filter$direction_enrichment <- ifelse(fgsea_res_TvsS_filter$NES > 0, "Upregulated in Tumors", "Downregulated in Tumors")
+cols <- c("Upregulated in Tumors" = "#382F61", "Downregulated in Tumors" = "#88B083")
+
+fgsea_res_TvsS_filter <- fgsea_res_TvsS_filter[c(1:10,74:83),]
+fgsea_res_TvsS_filter <- separate(fgsea_res_TvsS_filter, col = "pathway",
+                                  into = c(paste0("V", 1:8)), sep = "_")
+fgsea_res_TvsS_filter <- fgsea_res_TvsS_filter[,-1]
+
+fgsea_res_TvsS_filter <- tidyr::unite(fgsea_res_TvsS_filter, pathway, V2, V3, V4, V5,V6, V7,V8, na.rm = TRUE, sep = ' ')
+
+#png("./figures/GSEA_TvsS.png", units = "in", height = 8, width = 15, res = 600)
+ggplot(fgsea_res_TvsS_filter, aes(reorder(pathway, NES), NES, fill = direction_enrichment)) +
+  geom_col() +
+  scale_fill_manual(values = cols) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score") +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        text = element_text(size = 20),
+        legend.position = "bottom") +
+  labs(fill = "Pathway enrichment")
+#dev.off()
+
+#fgsea_res_TvsS_filter %>% 
+ # rowwise() %>% 
+#  mutate_if(is.list, ~paste(unlist(.), collapse = '|')) %>% 
+ # write.csv('fgseaRes_TumvsStrm_reactome.csv', row.names = FALSE)
+
+#write.table(mapdia_TvsS, "mapdia_TvsS_entrez_91822.txt", sep = "\t", quote = F, row.names = F, col.names = T)
+```
+

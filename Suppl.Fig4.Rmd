@@ -1,0 +1,676 @@
+---
+title: "Suppl_Fig.4"
+output: html_document
+date: "2024-03-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# location of original files on HPC
+```{r message=FALSE}
+
+# location of DEA between P vs R samples: /common/dabkek/re-NewAcquisition/tcga_style_mapdia_analysis_1-19-20/re-mapdia_msstats/prim_recur_DEA
+
+# results for Bowtell data were generated here: /common/bermanblab/data/private_data/POC_ROC/POC_ROC_RNA-Seq/TCR_RNA_seq/TRUST4/bowtell_TCR_seq
+
+
+```
+
+# loading libraries
+```{r message=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(readxl)
+library(tidyverse)
+library(ComplexHeatmap)
+library(ggpubr)
+library(ggrepel)
+library(factoextra)
+library(fgsea)
+```
+
+# Fig 4.A-B; Pvs R DEA and GSEA
+```{r message=FALSE}
+mapdia_PvsR <- read.table("./Data_for_paper_figures/mapDIA_PvsR_91822.txt", sep = "\t", header = T)
+mapdia_PvsR <- mapdia_PvsR[-1,]
+
+mapdia_PvsR <- separate(mapdia_PvsR, col = "Protein", into = c("a", "b", "Protein"),
+                        sep = "\\|")
+
+summary((filter(mapdia_PvsR, log2FC > 0.5) %>% filter(., FDR < .01))$Protein) # 31
+summary((filter(mapdia_PvsR, log2FC < -0.5) %>% filter(., FDR < .01))$Protein) # 34
+
+df <- mapdia_PvsR
+df <- separate(df, col = Protein, into = "Protein", sep = "_")
+
+#png("./figures/PvsR_log2FC.png", units = "in", height = 6, width = 9, res = 600)
+ggplot(data = df, aes(y = log2FC, x = -1*log10(FDR))) + geom_point(size = 3, color = "grey") +
+  geom_point(data = filter(df, log2FC > 0.5) %>% filter(., FDR <= 0.01), color = "#f97c03", size = 4) +
+  geom_point(data = filter(df, log2FC < -0.5) %>% filter(., FDR <= 0.01), color = "#5e4fa2", size = 4) +
+  theme_bw() +
+  geom_label_repel(data = filter(df, log2FC > 1) %>% filter(., FDR <= 0.01),
+                   aes(label = (filter(df, log2FC > 1) %>% filter(., FDR <= 0.01))$Protein),
+                   nudge_x = -0.20, nudge_y = 0.05, size = 4) +
+  geom_label_repel(data = filter(df, log2FC < -1.5) %>% filter(., FDR <= 0.01),
+                   aes(label = (filter(df, log2FC < -1.5) %>% filter(., FDR <= 0.01))$Protein),
+                   nudge_x = -0.20, nudge_y = 0.05, size = 4) +
+  theme(axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) +
+  coord_flip(clip = "off") +
+  theme(panel.grid = element_blank(),
+        text = element_text(size = 20))
+#dev.off()
+
+prot_entrez <- read.table("./Data_for_paper_figures/prot_get_entrezID_5K_013023.txt", sep = "\t", header = T)
+#colnames(prot_entrez) <- c("uniprot","Protein", "Entrez")
+prot_entrez <- prot_entrez[!duplicated(prot_entrez[,c("Protein")]),]
+prot_entrez <- prot_entrez[!duplicated(prot_entrez[,c("Entrez")]),]
+
+mapdia_PvsR <- left_join(mapdia_PvsR, prot_entrez)
+sum(is.na(mapdia_PvsR))
+
+mapdia_PvsR <- na.omit(mapdia_PvsR)
+
+
+
+ranks_P_R <- mapdia_PvsR$log2FC
+names(ranks_P_R) <- mapdia_PvsR$Entrez
+
+pathways_c2 <- gmtPathways("./Data_for_paper_figures/c2.all.v2022.1.Hs.entrez.gmt")
+
+
+set.seed(4242)
+fgseaRes_PvsR_c2 <- fgseaMultilevel(pathways_c2, ranks_P_R, minSize=1, 
+                                    maxSize = Inf, nPermSimple = 10000)
+
+fgseaRes_PvsR_c2 <- na.omit(fgseaRes_PvsR_c2)
+fgseaRes_PvsR_c2_filter <- filter(fgseaRes_PvsR_c2, padj < 0.05)
+
+#fgseaRes_PvsR_c2_filter %>% 
+ # rowwise() %>% 
+  #mutate_if(is.list, ~paste(unlist(.), collapse = '|')) %>% 
+  #write.csv('fgseaRes_PvsR_filt.csv', row.names = FALSE)
+
+
+fgseaRes_PvsR_c2_filter <- fgseaRes_PvsR_c2_filter[order(fgseaRes_PvsR_c2_filter$NES, 
+                                                         decreasing = T),]
+
+
+fgseaRes_PvsR_c2_filter$direction_enrichment <- ifelse(fgseaRes_PvsR_c2_filter$NES > 0, "Upregulated in Primary tumors", "Downregulated in Primary tumors")
+cols <- c("Upregulated in Primary tumors" = "#f97c03", "Downregulated in Primary tumors" = "#5e4fa2")
+
+fgseaRes_PvsR_c2_filter <- separate(fgseaRes_PvsR_c2_filter, col = "pathway",
+                                    into = c(paste0("V", 1:8)), sep = "_")
+fgseaRes_PvsR_c2_filter <- fgseaRes_PvsR_c2_filter[,-1]
+
+fgseaRes_PvsR_c2_filter <- tidyr::unite(fgseaRes_PvsR_c2_filter, pathway, V2, V3, V4, V5,V6, 
+                                        V7, V8, na.rm = TRUE, sep = ' ')
+
+#png("./figures/GSEA_PvsR.png", units = "in", height = 8, width = 19, res = 600)
+ggplot(fgseaRes_PvsR_c2_filter, aes(reorder(pathway, NES), NES, fill = direction_enrichment)) +
+  geom_col() +
+  scale_fill_manual(values = cols) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score") +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        text = element_text(size = 20),
+        legend.position = "bottom") +
+  labs(fill = "Pathway enrichment")
+#dev.off()
+
+#write.table(mapdia_PvsR, "mapdia_PvsR_entrez_91822.txt", 
+ #           sep = "\t", quote = F,
+  #          row.names = F, col.names = T)
+```
+
+# Suppl.Fig.4.C
+```{r message=FALSE}
+centroid_counts <- read.table("./Data_for_paper_figures/merged_centroid_ROI_CellCount.txt", sep = "\t", header = F)
+colnames(centroid_counts) <- c("cell_type", "cell_count", "image_svs_name")
+
+centroid_counts <- centroid_counts %>% group_by(image_svs_name, cell_type) %>% summarise(cell_count_bysample = sum(cell_count))
+colnames(centroid_counts) <- c("image_svs_name", "cell_type", "cell_count")
+
+
+library(readxl)
+
+FFPE_coldata_updated <- read_excel("./Data_for_paper_figures/FFPE_coldata_updated_121822.xlsx")
+
+setdiff(unique(FFPE_coldata_updated$image_svs_name), unique(centroid_counts$image_svs_name)) # 14 sections that did not need an ROI defined
+setdiff(unique(centroid_counts$image_svs_name), unique(FFPE_coldata_updated$image_svs_name))
+
+merged_ffpe_whole_slide <- read.table("./Data_for_paper_figures/merged_FFPE_whole_slide_count_011823.txt",
+                                      header = F)
+
+colnames(merged_ffpe_whole_slide) <- c("cell_count", "cell_type", "image_svs_name")
+setdiff(unique(centroid_counts$image_svs_name), unique(merged_ffpe_whole_slide$image_svs_name))
+setdiff(unique(merged_ffpe_whole_slide$image_svs_name), unique(centroid_counts$image_svs_name))
+
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, !image_svs_name %in% unique(centroid_counts$image_svs_name)) # remove the old counts
+
+merged_ffpe_whole_slide <- rbind(merged_ffpe_whole_slide, centroid_counts) # add the ROI specific counts
+
+# remove some samples from the analysis based on Akoya staining/absence of tissue
+# remove slide19 = spleen sample (no tumor cells in the tissue; Akoya staining)
+# remove slide48 = omentum sample (almost no tumor) I decided to remove, not profiled for Akoya
+# remove slide52 = pelvis sample (no tumor cells in the tissue; Akoya staining)
+
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, !image_svs_name == "KD-6394-048") # not profiled for Akoya
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, !image_svs_name == "KD-6394-019") # spleen 05S-14310-D
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, !image_svs_name == "KD-6394-052") # Pelvis S09-38573-C1
+
+FFPE_coldata_updated <- filter(FFPE_coldata_updated, !image_svs_name == "KD-6394-048")
+FFPE_coldata_updated <- filter(FFPE_coldata_updated, !image_svs_name == "KD-6394-019")
+FFPE_coldata_updated <- filter(FFPE_coldata_updated, !image_svs_name == "KD-6394-052")
+
+# merged ffpe contains 71 samples while FFPE_coldata contains 64 samples
+# the 7 sample difference is because merged file contains extra samples that were duplicates of the same tissue form the pilot FFPE slides
+# and one MJ slide which did not have almost any tissue in it
+
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, image_svs_name %in% FFPE_coldata_updated$image_svs_name)
+unique(merged_ffpe_whole_slide$image_svs_name) # 64 images considered here
+
+# getting percentage of cell types
+sample_total_cell_count <-  merged_ffpe_whole_slide %>% group_by(image_svs_name) %>% 
+  summarise(total_cell_count = sum(cell_count))
+
+merged_ffpe_whole_slide <- left_join(merged_ffpe_whole_slide, sample_total_cell_count)
+
+merged_ffpe_whole_slide$cell_perc <- (merged_ffpe_whole_slide$cell_count/merged_ffpe_whole_slide$total_cell_count)*100
+
+merged_ffpe_whole_slide <- left_join(merged_ffpe_whole_slide, FFPE_coldata_updated)
+
+merged_ffpe_whole_slide$prim_HRD <- paste(merged_ffpe_whole_slide$prim_recur, 
+                                          merged_ffpe_whole_slide$HRD_status, sep = "-")
+
+sum(is.na(merged_ffpe_whole_slide))
+
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, cell_type != "nolabe")
+merged_ffpe_whole_slide <- filter(merged_ffpe_whole_slide, cell_type != "no-neo")
+
+merged_ffpe_whole_slide$cell_type[grep("connec", merged_ffpe_whole_slide$cell_type)] <- "Connective"
+merged_ffpe_whole_slide$cell_type[grep("necros", merged_ffpe_whole_slide$cell_type)] <- "Necrotic"
+merged_ffpe_whole_slide$cell_type[grep("inflam", merged_ffpe_whole_slide$cell_type)] <- "Inflammatory"
+merged_ffpe_whole_slide$cell_type[grep("neopla", merged_ffpe_whole_slide$cell_type)] <- "Neoplastic"
+
+merged_ffpe_whole_slide <- merged_ffpe_whole_slide[order(merged_ffpe_whole_slide$prim_HRD),]
+
+my_comparisons <- list( c("Primary-HRD", "Recurrent-HRD"),
+                        c("Primary-HRP", "Recurrent-HRP"),
+                        c("Primary-HRD", "Primary-HRP"),
+                        c("Recurrent-HRD", "Recurrent-HRP"))
+p <- merged_ffpe_whole_slide %>% filter(., cell_type %in% c("Inflammatory", "Connective")) %>%
+  ggboxplot(., x = "prim_HRD", y = "cell_perc",
+            fill = "prim_HRD", palette = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD'),
+            add = "jitter",
+            facet.by = "cell_type",
+            ylab = "Percentage of cell types")
+
+#png("./figures/whole_slide_count_prim_HRD_conn_inflam.png", units = "in", height = 10, 
+ #   width = 12, res = 600)
+p + stat_compare_means(comparisons = c(my_comparisons), 
+                       method = "wilcox.test",  size = 8, ylab = 90) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top") +
+  labs(fill = "") + ylim(c(0,110))
+#dev.off()
+
+p <- merged_ffpe_whole_slide %>% filter(., cell_type %in% c("Necrotic")) %>%
+  ggboxplot(., x = "prim_HRD", y = "cell_perc",
+            fill = "prim_HRD", palette = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD'),
+            add = "jitter",
+            facet.by = "cell_type",
+            ylab = "Percentage of cell types")
+
+#png("./figures/whole_slide_count_prim_HRD_necrotic.png", units = "in", height = 10, 
+  #  width = 8, res = 600)
+p + stat_compare_means(comparisons = c(my_comparisons), 
+                       method = "wilcox.test",  size = 8, ylab = 12) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none") +
+  labs(fill = "") + ylim(c(0,14))
+#dev.off()
+
+p <- merged_ffpe_whole_slide %>% filter(., cell_type %in% c("Neoplastic")) %>%
+  ggboxplot(., x = "prim_HRD", y = "cell_perc",
+            fill = "prim_HRD", palette = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD'),
+            add = "jitter",
+            facet.by = "cell_type",
+            ylab = "Percentage of cell types")
+
+#png("./figures/whole_slide_count_prim_HRD_neoplastic.png", units = "in", height = 10, 
+ #   width = 8, res = 600)
+p + stat_compare_means(comparisons = c(my_comparisons), 
+                       method = "wilcox.test",  size = 8, ylab= 95) +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none") +
+  labs(fill = "") + ylim(c(0,130))
+#dev.off()
+```
+
+# Suppl.Fig.4.D
+```{r message=FALSE}
+NN_analysis_all <- read.table("./Data_for_paper_figures/merged_threshold_NN_011823.txt",
+                              sep = "\t", header = F)
+
+colnames(NN_analysis_all) <- c("cell_type","cellcount_40",	"cellcount_50",	
+                               "cellcount_60",	"cellcount_70",	"cellcount_80",	"total_count",	
+                               "image_svs_name")
+NN_analysis_all$cell_type[grep("connec", NN_analysis_all$cell_type)] <- "Connective"
+NN_analysis_all$cell_type[grep("necros", NN_analysis_all$cell_type)] <- "Necrotic"
+NN_analysis_all$cell_type[grep("inflam", NN_analysis_all$cell_type)] <- "Inflammatory"
+NN_analysis_all$cell_type[grep("neopla", NN_analysis_all$cell_type)] <- "Neoplastic"
+NN_analysis_all$cell_type[grep("no-neo", NN_analysis_all$cell_type)] <- "Non-Neoplastic"
+
+NN_analysis_all <- filter(NN_analysis_all, image_svs_name %in% FFPE_coldata_updated$image_svs_name)
+
+NN_analysis_all$perc_40 <- (NN_analysis_all$cellcount_40/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_50 <- (NN_analysis_all$cellcount_50/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_60 <- (NN_analysis_all$cellcount_60/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_70 <- (NN_analysis_all$cellcount_70/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_80 <- (NN_analysis_all$cellcount_80/NN_analysis_all$total_count)*100
+
+NN_analysis_all <- left_join(NN_analysis_all, FFPE_coldata_updated)
+sum(is.na(NN_analysis_all))
+
+NN_analysis_all$prim_HRD <- paste(NN_analysis_all$prim_recur, NN_analysis_all$HRD_status, sep = "-")
+
+NN_analysis_all_filt <- filter(NN_analysis_all, cell_type != "Non-Neoplastic")
+
+p <- ggboxplot(NN_analysis_all_filt, x = "simple_site", y = "perc_40",
+               outlier.shape = NA) 
+
+table(NN_analysis_all_filt$simple_site)
+NN_analysis_all_filt$simple_site[grep("ovary", NN_analysis_all_filt$simple_site)] <- "Ovary"
+NN_analysis_all_filt$simple_site[grep("lymph", NN_analysis_all_filt$simple_site)] <- "Lymph"
+NN_analysis_all_filt$simple_site[grep("adnexa", NN_analysis_all_filt$simple_site)] <- "Adnexa"
+NN_analysis_all_filt$simple_site[grep("diaphragm", NN_analysis_all_filt$simple_site)] <- "Diaphragm"
+NN_analysis_all_filt$simple_site[grep("pelvis", NN_analysis_all_filt$simple_site)] <- "Pelvis"
+NN_analysis_all_filt$simple_site[grep("abd_wall", NN_analysis_all_filt$simple_site)] <- "Abd_wall"
+NN_analysis_all_filt$simple_site[grep("bowel", NN_analysis_all_filt$simple_site)] <- "Bowel"
+NN_analysis_all_filt$simple_site[grep("omentum", NN_analysis_all_filt$simple_site)] <- "Omentum"
+NN_analysis_all_filt$simple_site[grep("brain", NN_analysis_all_filt$simple_site)] <- "Brain"
+NN_analysis_all_filt$simple_site[grep("gallbladder", NN_analysis_all_filt$simple_site)] <- "Gallbladder"
+NN_analysis_all_filt$simple_site[grep("rectum", NN_analysis_all_filt$simple_site)] <- "Rectum"
+NN_analysis_all_filt$simple_site[grep("spleen", NN_analysis_all_filt$simple_site)] <- "Spleen"
+
+
+p <- filter(NN_analysis_all_filt, simple_site %in% c("Ovary", "Lymph", "Adnexa", "Omentum", "Diaphragm", "Pelvis", "Rectum","Abd_wall", "Spleen")) %>% 
+  filter(., !cell_type == "Inflammatory") %>% 
+  #filter(., cell_type == "Necrotic") %>% 
+  ggboxplot(., x = "simple_site", y = "perc_40",
+            outlier.shape = NA) 
+# Use only p.format as label. Remove method name.
+#png("./figures/NN_all_celtypes_site.png", units = "in", height = 7, 
+ #   width = 12, res = 600)
+p + stat_compare_means(size = 8, method = "wilcox.test",ref.group = "Ovary",
+                       label = "p.signif") +
+  theme(text = element_text(size = 20),
+        legend.position = "top",
+        plot.margin = margin(1, 1, 1, 1, "cm"),
+        panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+  ylab(expression(paste("% total cell type near \n immune-rich neighborhoods"))) +
+  labs(fill = "") + xlab(" ") +
+  geom_jitter(aes(color = cell_type), width = 0.15)
+#dev.off()
+```
+
+# Suppl.Fig.4.E - bowtell data
+```{r message=FALSE}
+morisita_idx_bowtell <- read.table("./Data_for_paper_figures/morisita_index_overlap_bowtell.txt",
+                                   sep = "\t", header = T)
+morisita_idx_bowtell <- na.omit(morisita_idx_bowtell)
+
+my_comparisons <- list( c("HRD", "HRP"))
+
+#png("./figures/TCR-seq_morisita_bowtell.png", units = "in", height = 5, 
+ #   width = 4, res = 600)
+ggplot(morisita_idx_bowtell, aes(x = group, y = morisita_idx, col = group)) +
+  geom_point(position = position_jitter(width = 0.15)) +
+  scale_color_manual(values = c("#AA323F", "#286D97")) +
+  theme_bw() +
+  theme(legend.position = 'None',
+        text = element_text(size = 25)) +
+  labs(y = "Morisita-Horn Index") +
+  ylim(c(-0.01,0.65))
+#dev.off()
+
+
+clonotype_overlap_bowtell <- read.table("./Data_for_paper_figures/shared_clonotype_count_bowtell.txt",
+                                        sep = "\t", header = T)
+
+my_comparisons <- list( c("HRD", "HRP"),
+                        c("HRD", "HRD-HRP"),
+                        c("HRP", "HRD-HRP"))
+
+p3 <- ggviolin(clonotype_overlap_bowtell, x = "group", fill = "group",
+               y = "clonotype_overlap", add = "boxplot",
+               add.params = list(fill = NA, width = 0.05),
+               palette = c("#AA323F", "#286D97", "black"),
+               ylab = "# of shared clonotypes")
+# Use only p.format as label. Remove method name.
+#png("./figures/TCR-seq_shared_clonotype_bowtell.png", units = "in", 
+ #   height = 8, width = 7, res = 600)
+p3 + geom_jitter(shape=16, position=position_jitter(0.02)) +
+  stat_compare_means(comparisons = my_comparisons, 
+                     method = "t.test",  size = 8) +
+  theme(text = element_text(size = 25),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "None",
+        panel.border = element_rect(colour = "black", fill=NA, size=0.5)) +
+  labs(fill = "")
+#dev.off()
+```
+
+# Suppl.Fig.4.F - Survival analysis - old NN data
+```{r message=FALSE}
+NN_analysis_all <- read.table("./Data_for_paper_figures/merged_threshold_NN_011823.txt",
+                              sep = "\t", header = F)
+
+colnames(NN_analysis_all) <- c("cell_type","cellcount_40",	"cellcount_50",	
+                               "cellcount_60",	"cellcount_70",	"cellcount_80",	"total_count",	
+                               "image_svs_name")
+NN_analysis_all$cell_type[grep("connec", NN_analysis_all$cell_type)] <- "Connective"
+NN_analysis_all$cell_type[grep("necros", NN_analysis_all$cell_type)] <- "Necrotic"
+NN_analysis_all$cell_type[grep("inflam", NN_analysis_all$cell_type)] <- "Inflammatory"
+NN_analysis_all$cell_type[grep("neopla", NN_analysis_all$cell_type)] <- "Neoplastic"
+NN_analysis_all$cell_type[grep("no-neo", NN_analysis_all$cell_type)] <- "Non-Neoplastic"
+
+NN_analysis_all <- filter(NN_analysis_all, image_svs_name %in% FFPE_coldata_updated$image_svs_name)
+
+NN_analysis_all$perc_40 <- (NN_analysis_all$cellcount_40/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_50 <- (NN_analysis_all$cellcount_50/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_60 <- (NN_analysis_all$cellcount_60/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_70 <- (NN_analysis_all$cellcount_70/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_80 <- (NN_analysis_all$cellcount_80/NN_analysis_all$total_count)*100
+
+NN_analysis_all <- left_join(NN_analysis_all, FFPE_coldata_updated)
+sum(is.na(NN_analysis_all))
+
+NN_analysis_all$prim_HRD <- paste(NN_analysis_all$prim_recur, NN_analysis_all$HRD_status, sep = "-")
+
+NN_analysis_all_filt <- filter(NN_analysis_all, cell_type != "Non-Neoplastic")
+
+NN_neoplastic_only <- filter(NN_analysis_all_filt, cell_type == "Neoplastic")
+
+NN_mean_patient <-  NN_neoplastic_only %>% group_by(Patient_ID) %>% 
+  summarise(Mean_count = mean(perc_40))
+
+summary(NN_mean_patient$Mean_count)
+NN_mean_patient$high_immune <- ifelse(NN_mean_patient$Mean_count > summary(NN_mean_patient$Mean_count)[[5]],
+                                      "Higher immune rich regions", "Lower immune rich regions")
+# range of patients with neoplastic cells in high immune rich neighborhoods: 1-21%
+
+patient_survival <- read.csv("./Data_for_paper_figures/Patient_survival.csv")
+colnames(patient_survival) <- c("Patient_ID", "Time_to_death")
+cluster_membership <- left_join(NN_mean_patient, patient_survival)
+
+cluster_membership$censored <- "1"
+cluster_membership$censored[grep("Alive", cluster_membership$Time_to_death)] <- "0"
+
+cluster_membership$Time_to_death[grep("0", cluster_membership$censored)] <- "7300"
+
+cluster_membership[,grep("death", colnames(cluster_membership))] <- lapply(grep("death", colnames(cluster_membership)), function(x) as.numeric(cluster_membership[[x]]))
+
+cluster_membership$Time_to_death <- cluster_membership$Time_to_death/365
+cluster_membership[,grep("censored", colnames(cluster_membership))] <- lapply(grep("censored", colnames(cluster_membership)), function(x) as.numeric(cluster_membership[[x]]))
+
+library(survival)
+library(survminer)
+
+surv_object <- Surv(time = cluster_membership$Time_to_death,
+                    event = cluster_membership$censored)
+
+
+fit1 <- survfit(surv_object ~ high_immune, data = cluster_membership)
+print(fit1)
+
+#png("./figures/NN-neoplastic_survival_average.png", units = "in", 
+ #   height = 8, width = 10, res = 600)
+ggsurvplot(fit1, data = cluster_membership, pval = TRUE, risk.table = TRUE,
+           palette = c("#5CBD9F", "#5e4fa2"), 
+           font.tickslab = c(20),
+           legend.labs=c("Higher immune rich regions","Lower immune rich regions"),
+           legend.title = "",
+           ggtheme = theme_classic2(base_size=20, base_family = "Arial"),
+           font.family = "Arial") +
+  labs(x = "Time (years)")
+#dev.off()
+```
+
+# Suppl.Fig.4.G
+```{r message=FALSE}
+
+NN_analysis_all <- read.table("./Data_for_paper_figures/merged_threshold_NN_110623.txt",
+                              sep = "\t", header = F)
+
+colnames(NN_analysis_all) <- c("cell_type","cellcount_40",	"cellcount_50",	
+                               "cellcount_60",	"cellcount_70",	"cellcount_80",	"total_count",	
+                               "image_svs_name")
+NN_analysis_all$cell_type[grep("connec", NN_analysis_all$cell_type)] <- "Connective"
+NN_analysis_all$cell_type[grep("necros", NN_analysis_all$cell_type)] <- "Necrotic"
+NN_analysis_all$cell_type[grep("inflam", NN_analysis_all$cell_type)] <- "Inflammatory"
+NN_analysis_all$cell_type[grep("neopla", NN_analysis_all$cell_type)] <- "Neoplastic"
+NN_analysis_all$cell_type[grep("no-neo", NN_analysis_all$cell_type)] <- "Non-Neoplastic"
+
+
+old_NN_analysis_all <- read.table("./Data_for_paper_figures/merged_threshold_NN_011823.txt",
+                                  sep = "\t", header = F)
+colnames(old_NN_analysis_all) <- c("cell_type","cellcount_40",	"cellcount_50",	
+                                   "cellcount_60",	"cellcount_70",	"cellcount_80",	"total_count",	
+                                   "image_svs_name")
+old_NN_analysis_all$cell_type[grep("connec", old_NN_analysis_all$cell_type)] <- "Connective"
+old_NN_analysis_all$cell_type[grep("necros", old_NN_analysis_all$cell_type)] <- "Necrotic"
+old_NN_analysis_all$cell_type[grep("inflam", old_NN_analysis_all$cell_type)] <- "Inflammatory"
+old_NN_analysis_all$cell_type[grep("neopla", old_NN_analysis_all$cell_type)] <- "Neoplastic"
+old_NN_analysis_all$cell_type[grep("no-neo", old_NN_analysis_all$cell_type)] <- "Non-Neoplastic"
+
+
+
+old_NN_analysis_all <- filter(old_NN_analysis_all, !image_svs_name %in% unique(NN_analysis_all$image_svs_name))
+
+NN_analysis_all <- rbind(NN_analysis_all, old_NN_analysis_all)
+
+
+setdiff(unique(NN_analysis_all$image_svs_name), FFPE_coldata_updated$image_svs_name) ## 10 slides are different
+setdiff(FFPE_coldata_updated$image_svs_name, unique(NN_analysis_all$image_svs_name))
+
+NN_analysis_all <- filter(NN_analysis_all, image_svs_name %in% FFPE_coldata_updated$image_svs_name) # 64 slides same as used in centroid count
+
+NN_analysis_all$perc_40 <- (NN_analysis_all$cellcount_40/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_50 <- (NN_analysis_all$cellcount_50/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_60 <- (NN_analysis_all$cellcount_60/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_70 <- (NN_analysis_all$cellcount_70/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_80 <- (NN_analysis_all$cellcount_80/NN_analysis_all$total_count)*100
+
+NN_analysis_all <- left_join(NN_analysis_all, FFPE_coldata_updated)
+sum(is.na(NN_analysis_all))
+
+NN_analysis_all$prim_HRD <- paste(NN_analysis_all$prim_recur, NN_analysis_all$HRD_status, sep = "-")
+
+NN_analysis_all_filt <- filter(NN_analysis_all, cell_type != "Non-Neoplastic")
+
+NN_analysis_all_filt <- NN_analysis_all_filt[order(NN_analysis_all_filt$prim_HRD),]
+
+# split by cell type
+
+#png("./figures/NN_ROI_conn_020924.png", units = "in", height = 4, width = 4, res = 600)
+NN_analysis_all_filt %>% filter(., cell_type == "Connective") %>% 
+  ggplot(., aes(x = prim_HRD, y = perc_40, color = prim_HRD)) + 
+  geom_point(position = position_jitter(width = 0.15), size = 3) +
+  scale_color_manual(values = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD')) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top",
+        plot.margin = margin(1, 1, 1, 1, "cm")) +
+  ylim(c(-0.0001, 80)) + labs(y = "")
+#dev.off()
+
+NN_analysis_all_filt %>% filter(., cell_type == "Necrotic") %>% 
+  ggplot(., aes(x = prim_HRD, y = perc_40, color = prim_HRD)) + 
+  geom_point(position = position_jitter(width = 0.15), size = 3) +
+  scale_color_manual(values = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD')) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top",
+        plot.margin = margin(1, 1, 1, 1, "cm"))
+  #ylim(c(-0.0001, 80)) + labs(y = "")
+
+NN_analysis_all_filt %>% filter(., cell_type == "Neoplastic") %>% 
+  ggplot(., aes(x = prim_HRD, y = perc_40, color = prim_HRD)) + 
+  geom_point(position = position_jitter(width = 0.15), size = 3) +
+  scale_color_manual(values = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD')) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top",
+        plot.margin = margin(1, 1, 1, 1, "cm"))
+  #ylim(c(-0.0001, 80)) + labs(y = "")
+
+NN_analysis_all_filt %>% filter(., cell_type == "Inflammatory") %>% 
+  ggplot(., aes(x = prim_HRD, y = perc_40, color = prim_HRD)) + 
+  geom_point(position = position_jitter(width = 0.15), size = 3) +
+  scale_color_manual(values = c("#AA323F",'#286D97', "#E99DA5",'#96C2DD')) +
+  theme_bw() +
+  theme(text = element_text(size = 25),
+        axis.text.x=element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "top",
+        plot.margin = margin(1, 1, 1, 1, "cm"))
+  #ylim(c(-0.0001, 80)) + labs(y = "")
+
+```
+
+# Suppl.Fig.4.H - survival curve with only ROI specific data
+```{r message=FALSE}
+
+NN_analysis_all <- read.table("./Data_for_paper_figures/merged_threshold_NN_110623.txt",
+                              sep = "\t", header = F)
+
+colnames(NN_analysis_all) <- c("cell_type","cellcount_40",	"cellcount_50",	
+                               "cellcount_60",	"cellcount_70",	"cellcount_80",	"total_count",	
+                               "image_svs_name")
+NN_analysis_all$cell_type[grep("connec", NN_analysis_all$cell_type)] <- "Connective"
+NN_analysis_all$cell_type[grep("necros", NN_analysis_all$cell_type)] <- "Necrotic"
+NN_analysis_all$cell_type[grep("inflam", NN_analysis_all$cell_type)] <- "Inflammatory"
+NN_analysis_all$cell_type[grep("neopla", NN_analysis_all$cell_type)] <- "Neoplastic"
+NN_analysis_all$cell_type[grep("no-neo", NN_analysis_all$cell_type)] <- "Non-Neoplastic"
+
+
+old_NN_analysis_all <- read.table("./Data_for_paper_figures/merged_threshold_NN_011823.txt",
+                                  sep = "\t", header = F)
+colnames(old_NN_analysis_all) <- c("cell_type","cellcount_40",	"cellcount_50",	
+                                   "cellcount_60",	"cellcount_70",	"cellcount_80",	"total_count",	
+                                   "image_svs_name")
+old_NN_analysis_all$cell_type[grep("connec", old_NN_analysis_all$cell_type)] <- "Connective"
+old_NN_analysis_all$cell_type[grep("necros", old_NN_analysis_all$cell_type)] <- "Necrotic"
+old_NN_analysis_all$cell_type[grep("inflam", old_NN_analysis_all$cell_type)] <- "Inflammatory"
+old_NN_analysis_all$cell_type[grep("neopla", old_NN_analysis_all$cell_type)] <- "Neoplastic"
+old_NN_analysis_all$cell_type[grep("no-neo", old_NN_analysis_all$cell_type)] <- "Non-Neoplastic"
+
+
+
+old_NN_analysis_all <- filter(old_NN_analysis_all, !image_svs_name %in% unique(NN_analysis_all$image_svs_name))
+
+NN_analysis_all <- rbind(NN_analysis_all, old_NN_analysis_all)
+
+
+setdiff(unique(NN_analysis_all$image_svs_name), FFPE_coldata_updated$image_svs_name) ## 10 slides are different
+setdiff(FFPE_coldata_updated$image_svs_name, unique(NN_analysis_all$image_svs_name))
+
+NN_analysis_all <- filter(NN_analysis_all, image_svs_name %in% FFPE_coldata_updated$image_svs_name) # 64 slides same as used in centroid count
+
+NN_analysis_all$perc_40 <- (NN_analysis_all$cellcount_40/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_50 <- (NN_analysis_all$cellcount_50/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_60 <- (NN_analysis_all$cellcount_60/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_70 <- (NN_analysis_all$cellcount_70/NN_analysis_all$total_count)*100
+NN_analysis_all$perc_80 <- (NN_analysis_all$cellcount_80/NN_analysis_all$total_count)*100
+
+NN_analysis_all <- left_join(NN_analysis_all, FFPE_coldata_updated)
+sum(is.na(NN_analysis_all))
+
+NN_analysis_all$prim_HRD <- paste(NN_analysis_all$prim_recur, NN_analysis_all$HRD_status, sep = "-")
+
+NN_analysis_all_filt <- filter(NN_analysis_all, cell_type != "Non-Neoplastic")
+
+NN_neoplastic_only <- filter(NN_analysis_all_filt, cell_type == "Neoplastic")
+
+NN_mean_patient <-  NN_neoplastic_only %>% group_by(Patient_ID) %>% 
+  summarise(Mean_count = mean(perc_40)) # 28 patients
+
+summary(NN_mean_patient$Mean_count)
+
+# patients with number of neoplastic cells within immune rich neighborhoods greater than 5th quartile
+NN_mean_patient$high_immune <- ifelse(NN_mean_patient$Mean_count > summary(NN_mean_patient$Mean_count)[[5]],
+                                      "Higher immune rich regions", "Lower immune rich regions")
+# range of patients with neoplastic cells in high immune rich neighborhoods: 1.6-18%
+
+patient_survival <- read.csv("./Data_for_paper_figures/Patient_survival.csv")
+colnames(patient_survival) <- c("Patient_ID", "Time_to_death")
+cluster_membership <- left_join(NN_mean_patient, patient_survival)
+
+cluster_membership$censored <- "1"
+cluster_membership$censored[grep("Alive", cluster_membership$Time_to_death)] <- "0"
+
+cluster_membership$Time_to_death[grep("0", cluster_membership$censored)] <- "7300"
+
+cluster_membership[,grep("death", colnames(cluster_membership))] <- lapply(grep("death", colnames(cluster_membership)), function(x) as.numeric(cluster_membership[[x]]))
+
+cluster_membership$Time_to_death <- cluster_membership$Time_to_death/365
+cluster_membership[,grep("censored", colnames(cluster_membership))] <- lapply(grep("censored", colnames(cluster_membership)), function(x) as.numeric(cluster_membership[[x]]))
+
+library(survival)
+#install.packages("survminer")
+library(survminer)
+
+surv_object <- Surv(time = cluster_membership$Time_to_death,
+                    event = cluster_membership$censored)
+
+
+fit1 <- survfit(surv_object ~ high_immune, data = cluster_membership)
+print(fit1)
+
+#png("./figures/NN-neoplastic_survival_average_110623.png", units = "in", 
+ #   height = 8, width = 10, res = 600)
+ggsurvplot(fit1, data = cluster_membership, pval = TRUE, risk.table = TRUE,
+           palette = c("#5CBD9F", "#5e4fa2"), 
+           font.tickslab = c(20),
+           legend.labs=c("Higher immune rich regions","Lower immune rich regions"),
+           legend.title = "",
+           ggtheme = theme_classic2(base_size=20, base_family = "Arial"),
+           font.family = "Arial") +
+  labs(x = "Time (years)")
+#dev.off()
+
+
+
+
+```
+

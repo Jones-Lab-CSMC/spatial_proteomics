@@ -1,0 +1,85 @@
+---
+title: "Suppl_Fig6"
+output: html_document
+date: "2024-03-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# Loading libraries
+```{r setup, include=FALSE}
+###############################################################
+
+# This script was run as a function where I gave it a list of 
+#the files as a list
+# I did not knit this Rmarkdown
+# to run as a function use in command line:
+#xargs -n 1 Rscript tSNE_plots_function_91923.R < list.txt
+###############################################################
+
+rm(list = ls(all.names = TRUE))
+gc()
+
+
+library(tidyverse)
+library(ggplot2)
+```
+
+
+```{r setup, include=FALSE}
+cell_type_col <-  c("B cells" ="#1f77b4", "Cytotoxic T cells" ="#ff7f0e","Dendritic cells"="#279e68",
+                    "Helper T cells"= "#d62728","M1 Macrophages"= "#17becf","M2 Macrophages" ="#8c564b",
+                    "Monocytes"= "#e377c2", "NK cells"="#b5bd61", 
+                    "T cells double negative"="#aec7e8", "Tregs"="#aa40fc",
+                    "Endothelial cells" ="lightsalmon2", "Necrotic Tumor cells"= "gold2", "other"="burlywood3",
+                    "Tumor cells"= "#1F9698", "Epithelial cells"="gray19",
+                    "Smooth muscle cells"="brown4", "Fibroblasts" ="#000033")
+
+base_dir <- "/Users/dabkek/Library/CloudStorage/Box-Box/1_Primary_Recurrent_Project/DATA/Akoya_data_images_91123/"
+
+args <- commandArgs(trailingOnly = TRUE)
+fn <- args[1]
+
+start_time <- Sys.time()
+df <- read.csv(paste0(base_dir, "AKOYA_Data_ROI_specific_92223/", fn)) 
+
+filename <- fn
+
+str1 <- strsplit(filename, "_")[[1]][7]
+str2 <- strsplit(filename, "_")[[1]][8]
+str3 <- strsplit(filename, "_")[[1]][9]
+paste1 <- paste(str1, str2, sep = "-")
+paste2 <- paste(paste1, str3, sep = "_")
+
+metadata <- read_csv(paste0(base_dir, "Akoya_sample_info_25slides_072023.csv"))
+metadata <- as.data.frame(metadata)
+# S13-32894-G1 is labelled as S13-32894_G1 in the merged file
+# changing this specific accession number in the metadata file
+
+metadata[grep("S13-32894-G1", metadata$accession_number),1] <- "S13-32894_G1"
+
+output_filename = (filter(metadata, accession_number == paste2))$POCROC_labels
+df <- df[grep("Tumor", df$ROI_ID),] 
+
+png(paste0("./Figures/tSNE_plots/", output_filename, ".png"), units = "in", height = 8, width = 12, res = 300)
+ggplot(df, aes(x=tSNE1, y=tSNE2, col = df[,ncol(df)])) +
+  geom_point(size=2) + 
+  theme_minimal() +
+  scale_color_manual(values = cell_type_col) +
+  labs(title=paste((filter(metadata, accession_number == paste2))$image_svs_name,
+                   (filter(metadata, accession_number == paste2))$POCROC_labels, sep = "/"), 
+       x="t-SNE 1", y="t-SNE 2")
+dev.off()  
+
+end_time <- Sys.time()
+time_taken <- round(end_time - start_time,2)
+print(time_taken)
+
+
+
+
+```
+
